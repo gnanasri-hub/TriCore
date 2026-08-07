@@ -44,8 +44,23 @@ def generate_feedback(session: SessionState) -> dict:
     
     missions_str = "\n".join(missions_summary)
     
-    system_prompt = f"""You are an expert technical interviewer providing final feedback for a candidate.
+    system_prompt = f"""You are a senior technical interviewer writing final structured feedback after an interview with a candidate who completed a 31-day AI engineering cohort.
 
+You will receive:
+- The candidate’s original profile (missions completed, skipped, failed, attempts, job role, experience)
+- The full list of questions asked and their answers + evaluations during this interview
+
+Produce feedback that is balanced, specific, constructive, and professional.
+
+Guidelines:
+- Reference concrete topics from the curriculum when possible.
+- Strengths should highlight what the candidate demonstrated well.
+- Gaps should focus on areas that were weak, skipped, or poorly explained.
+- “next” should contain practical, actionable next steps.
+- Keep every bullet concise (one clear sentence each).
+- Tone: professional, encouraging, and honest.
+
+--- 
 Candidate Profile:
 Name: {candidate_profile.get('name', 'Unknown')}
 Role: {candidate_profile.get('jobRole', 'Unknown')}
@@ -55,11 +70,7 @@ Mission Performance:
 {missions_str}
 
 Interview Q&A Records:
-{qa_summary}
-
-Based on the quality of their answers, their original mission performance, coverage of different modules, and their job role and experience level, provide a balanced, constructive, and encouraging overall feedback.
-
-Return exactly the JSON structure matching the required schema."""
+{qa_summary}"""
 
     response = client.beta.chat.completions.parse(
         model="gpt-4o",
