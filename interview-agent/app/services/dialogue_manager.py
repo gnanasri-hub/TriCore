@@ -2,7 +2,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from app import session_store
-from app.schemas import InterviewResponse, Feedback
+from app.schemas import InterviewResponse, Feedback, SessionState
 from app.services import data_manager, evaluator, question_generator, feedback_generator
 
 logger = logging.getLogger(__name__)
@@ -50,13 +50,13 @@ def select_next_day(candidate_profile: Dict[str, Any], covered_days: List[int]) 
     if available_fallback:
         return available_fallback[0]
         
-    # If everything is covered, return any day not covered or just None
     return None
 
 def start_interview(session_id: str, candidate_data: Dict[str, Any]) -> str:
     """
-    Initialize session state, profile candidate, select first topic,
-    generate welcome + initial question, and save state.
+    Initialize SessionState, profile candidate, select first topic,
+    generate welcome + initial question using generate_question(session),
+    and save state.
     """
     # 1. Profile candidate using the Data Manager
     profile = data_manager.get_candidate_profile(candidate_data)
@@ -70,55 +70,46 @@ def start_interview(session_id: str, candidate_data: Dict[str, Any]) -> str:
     day_num = first_day_meta["day"]
     covered_days.append(day_num)
     
-    # 3. Generate initial question
-    welcome_question = question_generator.generate_initial_question(profile, first_day_meta)
-    
-    # 4. Create Session State
-    session_state = {
-        "session_id": session_id,
-        "candidate_profile": profile,
-        "history": [
-            {"role": "assistant", "content": welcome_question}
-        ],
-        "qa_records": [],
-        "covered_days": covered_days,
-        "current_day": day_num,
-        "question_count": 1,
-        "pending_follow_up": {
+    # 3. Initialize Pydantic SessionState object (without history first)
+    session_state = SessionState(
+        session_id=session_id,
+        candidate_profile=profile,
+        history=[],
+        qa_records=[],
+        covered_days=covered_days,
+        current_day=day_num,
+        question_count=1,
+        pending_follow_up={
             "is_pending": False,
             "follow_up_question": "",
             "original_question": "",
             "vague_answer": ""
         },
-        "interview_stage": "INTERVIEWING"
-    }
+        interview_stage="INTERVIEWING"
+    )
+    
+    # 4. Generate first question using the new signature
+    welcome_question = question_generator.generate_question(session_state)
+    session_state.history.append({"role": "assistant", "content": welcome_question})
     
     # 5. Save State
-    session_store.create_or_update_session(session_id, session_state)
+    session_store.create_or_update_session(session_id, session_state.model_dump())
     return welcome_question
 
-def should_end(state: Dict[str, Any]) -> bool:
+def should_end(session: SessionState) -> bool:
     """
     Enforce ending rules:
       - At least 8 questions asked.
       - Covered at least 4 distinct curriculum days.
     """
-    question_count = state.get("question_count", 0)
-    covered_days = state.get("covered_days", [])
-    
-    return question_count >= 8 and len(covered_days) >= 4
+    return session.question_count >= 8 and len(session.covered_days) >= 4
 
 def process_message(session_id: str, message: str) -> InterviewResponse:
     """
-    Process candidate message:
-      1. Evaluate answer.
-      2. If vague (and not already in follow-up), ask a follow-up.
-      3. Else, save Q&A evaluation, decide to end or generate new topic question.
+    Process candidate message using Pydantic SessionState structures.
     """
-    state = session_store.get_session(session_id)
-    if not state:
-        # Fallback initialization if session wasn't started explicitly with candidate
-        # We start with empty candidate data
+    state_dict = session_store.get_session(session_id)
+    if not state_dict:
         logger.warning(f"Session {session_id} not initialized. Starting default interview.")
         default_candidate = {
             "member": {"id": "CAND-DEFAULT", "name": "Candidate", "jobRole": "AI Engineer", "yearsExperience": 2},
@@ -128,56 +119,52 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
         reply = start_interview(session_id, default_candidate)
         return InterviewResponse(reply=reply, done=False)
         
-    profile = state["candidate_profile"]
-    current_day = state["current_day"]
+    # Load into Pydantic model
+    state = SessionState(**state_dict)
+    
+    profile = state.candidate_profile
+    current_day = state.current_day
     current_day_meta = data_manager.get_day_metadata(current_day)
     
-    # Determine the question that candidate is responding to
-    pending_follow_up = state["pending_follow_up"]
-    if pending_follow_up["is_pending"]:
+    # Determine the last question asked
+    pending_follow_up = state.pending_follow_up
+    if pending_follow_up.get("is_pending"):
         last_question = pending_follow_up["follow_up_question"]
     else:
-        # The last assistant message in history
         last_question = ""
-        for msg in reversed(state["history"]):
+        for msg in reversed(state.history):
             if msg["role"] == "assistant":
                 last_question = msg["content"]
                 break
                 
-    # 1. Evaluate answer
+    # 1. Evaluate candidate response
     evaluation = evaluator.evaluate_answer(last_question, message, current_day_meta)
     
     # Append user response to history
-    state["history"].append({"role": "user", "content": message})
+    state.history.append({"role": "user", "content": message})
     
-    # 2. Trigger follow-up if response is vague and we aren't already in a follow-up
-    if evaluation.is_vague and not pending_follow_up["is_pending"]:
+    # 2. Trigger follow-up if response is vague and we aren't in a follow-up
+    if evaluation.is_vague and not pending_follow_up.get("is_pending"):
         logger.info(f"Vague response detected on Day {current_day}. Generating follow-up.")
         
-        # Generate follow-up
-        follow_up_text = question_generator.generate_follow_up(last_question, message, state["history"])
+        follow_up_text = question_generator.generate_follow_up(last_question, message, state.history)
         
-        # Update follow-up status
-        state["pending_follow_up"] = {
+        state.pending_follow_up = {
             "is_pending": True,
             "follow_up_question": follow_up_text,
             "original_question": last_question,
             "vague_answer": message
         }
         
-        # Log the follow-up question to history
-        state["history"].append({"role": "assistant", "content": follow_up_text})
+        state.history.append({"role": "assistant", "content": follow_up_text})
+        state.question_count += 1
         
-        # Increment total question count
-        state["question_count"] += 1
-        
-        # Save state and return follow-up question
-        session_store.create_or_update_session(session_id, state)
+        session_store.create_or_update_session(session_id, state.model_dump())
         return InterviewResponse(reply=follow_up_text, done=False)
         
     # 3. Handle non-vague response or resolved follow-up response
     # Register QA record
-    if pending_follow_up["is_pending"]:
+    if pending_follow_up.get("is_pending"):
         combined_answer = f"Initial (Vague): {pending_follow_up['vague_answer']} | Follow-up: {message}"
         original_q = pending_follow_up["original_question"]
         qa_rec = {
@@ -189,8 +176,7 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
             "is_correct": evaluation.is_correct,
             "evaluation_notes": evaluation.evaluation_notes
         }
-        # Clear follow-up state
-        state["pending_follow_up"] = {
+        state.pending_follow_up = {
             "is_pending": False,
             "follow_up_question": "",
             "original_question": "",
@@ -207,14 +193,14 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
             "evaluation_notes": evaluation.evaluation_notes
         }
         
-    state["qa_records"].append(qa_rec)
+    state.qa_records.append(qa_rec)
     
     # 4. Check if interview should end
     if should_end(state):
         logger.info(f"Ending interview for session {session_id}. Generating final feedback.")
-        feedback = feedback_generator.generate_feedback(profile, state["qa_records"])
-        state["interview_stage"] = "COMPLETED"
-        session_store.create_or_update_session(session_id, state)
+        feedback = feedback_generator.generate_feedback(profile, state.qa_records)
+        state.interview_stage = "COMPLETED"
+        session_store.create_or_update_session(session_id, state.model_dump())
         
         return InterviewResponse(
             reply="Thank you! We have completed the interview and evaluated your responses.",
@@ -223,14 +209,12 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
         )
         
     # 5. Transition to next topic
-    next_day_meta = select_next_day(profile, state["covered_days"])
+    next_day_meta = select_next_day(profile, state.covered_days)
     if not next_day_meta:
-        # Fallback if somehow we run out of days (highly unlikely with 31 days)
-        # We end early in this case to avoid crashing
         logger.warning("No more curriculum days available. Ending early.")
-        feedback = feedback_generator.generate_feedback(profile, state["qa_records"])
-        state["interview_stage"] = "COMPLETED"
-        session_store.create_or_update_session(session_id, state)
+        feedback = feedback_generator.generate_feedback(profile, state.qa_records)
+        state.interview_stage = "COMPLETED"
+        session_store.create_or_update_session(session_id, state.model_dump())
         return InterviewResponse(
             reply="Thank you! The interview is complete.",
             done=True,
@@ -238,16 +222,14 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
         )
         
     next_day_num = next_day_meta["day"]
-    state["covered_days"].append(next_day_num)
-    state["current_day"] = next_day_num
+    state.covered_days.append(next_day_num)
+    state.current_day = next_day_num
     
-    # Generate new topic question
-    next_question = question_generator.generate_next_question(profile, next_day_meta, state["history"])
-    state["history"].append({"role": "assistant", "content": next_question})
-    
-    # Increment question count for the new topic question
-    state["question_count"] += 1
+    # Generate new topic question using new generate_question signature
+    next_question = question_generator.generate_question(state)
+    state.history.append({"role": "assistant", "content": next_question})
+    state.question_count += 1
     
     # Save State
-    session_store.create_or_update_session(session_id, state)
+    session_store.create_or_update_session(session_id, state.model_dump())
     return InterviewResponse(reply=next_question, done=False)
