@@ -92,21 +92,28 @@ async def generate_follow_up(evaluation: Evaluation, question: str, answer: str)
     """
     Generates a follow-up question based on the evaluation of the candidate's answer.
     """
-    system_prompt = f"""You are a technical interviewer. 
-The original question was: {question}
-The candidate's answer was: {answer}
+    system_prompt = f"""You are a senior technical interviewer. The candidate just gave an answer that needs a follow-up.
 
-The evaluation of this answer found:
-Vague: {evaluation.is_vague}
-Strong: {evaluation.is_strong}
-Incomplete: {evaluation.is_incomplete}
-Strengths: {', '.join(evaluation.strengths) if evaluation.strengths else 'None'}
-Missing points: {', '.join(evaluation.missing_points) if evaluation.missing_points else 'None'}
+Original Question: {question}
+Candidate's Answer: {answer}
 
-Your task is to generate ONE follow-up question. 
-- If the answer was vague or incomplete, ask them to clarify or fill in the missing points.
-- If the answer was strong, ask a challenging follow-up question to probe their depth of knowledge on the same topic.
-Keep the question concise and conversational."""
+Evaluation context:
+- Vague: {evaluation.is_vague}
+- Incomplete: {evaluation.is_incomplete}
+- Strong: {evaluation.is_strong}
+- Strengths: {', '.join(evaluation.strengths) if evaluation.strengths else 'None'}
+- Missing points: {', '.join(evaluation.missing_points) if evaluation.missing_points else 'None'}
+
+Generate one natural, professional follow-up question.
+
+Rules:
+- If the answer was vague or incomplete → ask them to clarify, elaborate, or give a concrete example.
+- If the answer was strong → escalate slightly (ask about edge cases, trade-offs, or how they would improve it).
+- Keep the follow-up concise (1–2 sentences).
+- Sound encouraging and professional.
+- Do not introduce a completely new topic.
+
+Return ONLY the follow-up question text."""
 
     response = await client.chat.completions.create(
         model="gpt-4o",
