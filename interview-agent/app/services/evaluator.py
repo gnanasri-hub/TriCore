@@ -15,19 +15,25 @@ class Evaluation(BaseModel):
     is_incomplete: bool = Field(description="Whether the answer misses key parts of the question")
     strengths: List[str] = Field(description="Concrete strengths of the answer")
     missing_points: List[str] = Field(description="Important missing points or inaccuracies")
+    overall_comment: str = Field(description="one short sentence summary")
 
 async def evaluate_answer(question: str, answer: str, curriculum_context: str) -> Evaluation:
     """
     Evaluates the candidate's answer using GPT-4o based on the question and curriculum context.
     Returns an Evaluation object.
     """
-    system_prompt = f"""You are an expert technical interviewer evaluating a candidate's answer.
+    system_prompt = f"""You are an expert technical interviewer evaluating a candidate’s answer during an AI engineering interview.
+
+Evaluate the answer based on the curriculum context provided.
+
 Question asked: {question}
 Expected curriculum context: {curriculum_context}
 
-Evaluate the candidate's answer based on technical accuracy, depth, and clarity.
-Determine if the answer is vague, strong, or incomplete.
-Extract concrete strengths and missing points."""
+Guidelines:
+- Be fair but rigorous.
+- Short or generic answers → mark as vague/incomplete.
+- Answers that show real understanding, examples, or trade-offs → mark as strong.
+- Only use the provided curriculum context to judge correctness."""
     
     response = await client.beta.chat.completions.parse(
         model="gpt-4o",
