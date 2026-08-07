@@ -303,3 +303,20 @@ def retrieve_relevant_days(
             break
             
     return results
+
+def get_all_days_metadata() -> List[Dict[str, Any]]:
+    """
+    Retrieve metadata for all 31 curriculum days.
+    """
+    ensure_index_loaded()
+    return _metadata
+
+def get_day_metadata(day_num: int) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve metadata for a specific curriculum day number.
+    """
+    ensure_index_loaded()
+    for d in _metadata:
+        if d.get("day") == day_num:
+            return d
+    return None
