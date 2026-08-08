@@ -12,7 +12,7 @@ def _get_client() -> OpenAI:
         _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     return _client
 
-# Answers shorter than this (stripped) are always treated as vague regardless of LLM verdict
+# Answers shorter than this (stripped) are always treated as vague regardless of LLM verdict.
 MIN_ANSWER_LENGTH = 15
 
 
@@ -42,8 +42,8 @@ def evaluate_answer(question: str, answer: str, curriculum_context: Any) -> Eval
     """
     Evaluate the candidate's answer synchronously using GPT-4o structured output.
 
-    Applies a hard min-length guard before calling the LLM: answers under
-    MIN_ANSWER_LENGTH characters are immediately flagged as vague without an API call.
+    A hard min-length guard short-circuits the LLM call for trivially short answers,
+    saving tokens and latency.
     """
     # ── Hard min-length guard ─────────────────────────────────────────────────
     if len(answer.strip()) < MIN_ANSWER_LENGTH:
@@ -55,37 +55,52 @@ def evaluate_answer(question: str, answer: str, curriculum_context: Any) -> Eval
             is_strong=False,
             is_incomplete=True,
             strengths=[],
-            missing_points=["Answer was too short to evaluate."],
-            overall_comment="Answer was too short — no substantive content to assess.",
+            missing_points=["The answer was too short to assess — no substantive content provided."],
+            overall_comment="Answer was too brief to evaluate meaningfully.",
         )
 
     # ── Serialise curriculum context ──────────────────────────────────────────
     if isinstance(curriculum_context, dict):
         context_str = (
-            f"Day {curriculum_context.get('day', '?')}: {curriculum_context.get('title', '')}\n"
-            f"Objectives: {', '.join(curriculum_context.get('objectives', []))}\n"
-            f"Tools: {', '.join(curriculum_context.get('tools', []))}"
+            f"Day {curriculum_context.get('day', '?')}: "
+            f"{curriculum_context.get('title', 'Unknown topic')}\n"
+            f"Learning objectives: {', '.join(curriculum_context.get('objectives', []))}\n"
+            f"Key tools / concepts: {', '.join(curriculum_context.get('tools', []))}"
         )
     else:
         context_str = str(curriculum_context)
 
-    system_prompt = (
-        "You are an expert technical interviewer evaluating a candidate's answer "
-        "during an AI engineering interview.\n\n"
-        f"Question asked: {question}\n"
-        f"Curriculum context:\n{context_str}\n\n"
-        "Guidelines:\n"
-        "- Be fair but rigorous.\n"
-        "- Short or generic answers → mark as vague/incomplete.\n"
-        "- Answers that show real understanding, examples, or trade-offs → mark as strong.\n"
-        "- Only use the provided curriculum context to judge correctness."
+    system_prompt = """\
+You are a senior AI engineering interviewer evaluating a candidate's answer during a \
+technical interview. Your evaluation feeds directly into the candidate's final feedback \
+report, so accuracy and fairness matter.
+
+Evaluation principles:
+- Judge the answer against the curriculum context provided — that is the source of truth \
+  for what a correct, complete answer looks like.
+- Reward genuine understanding: concrete examples, correct use of terminology, awareness \
+  of trade-offs, and practical implementation knowledge all indicate depth.
+- Penalise vagueness fairly: "it depends" with no elaboration, restating the question, \
+  or generic platitudes without specifics should lower scores.
+- A strong answer doesn't need to be perfect — it needs to demonstrate that the candidate \
+  actually knows this topic, not just that they've heard of it.
+- Be calibrated: reserve scores of 9–10 for truly excellent answers that cover edge cases \
+  and nuance. Most solid answers sit in the 6–8 range.
+- overall_comment: write one honest, constructive sentence as if you were telling a colleague \
+  how the candidate did on this question.\
+"""
+
+    user_prompt = (
+        f"Curriculum context for this question:\n{context_str}\n\n"
+        f"Question asked:\n{question}\n\n"
+        f"Candidate's answer:\n{answer}"
     )
 
     response = _get_client().beta.chat.completions.parse(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Candidate's answer: {answer}"},
+            {"role": "user",   "content": user_prompt},
         ],
         response_format=Evaluation,
     )
@@ -99,62 +114,68 @@ def decide_next_action(
     """
     Decide what to do after evaluating an answer.
 
-    Rules (in priority order):
-      1. Already answering a follow-up → always move to new_question (no chaining).
-      2. Answer is vague OR incomplete → always ask a follow-up.
-      3. Answer is strong with depth >= 8 → move to new_question (earned it).
-      4. Answer is strong but depth < 8 → follow_up to probe deeper.
-      5. Default → new_question.
+    Priority order:
+      1. Already on a follow-up  → new_question  (hard cap: never chain follow-ups)
+      2. Vague OR incomplete     → follow_up     (always probe once)
+      3. Strong + depth >= 8     → new_question  (candidate earned the move)
+      4. Strong + depth < 8      → follow_up     (push for more depth)
+      5. Default                 → new_question
     """
     if isinstance(session, dict):
         pending = session.get("pending_follow_up", {})
     else:
         pending = getattr(session, "pending_follow_up", {})
 
-    # Rule 1: hard cap — never chain follow-ups
     if pending.get("is_pending", False):
         return "new_question"
 
-    # Rule 2: vague or incomplete → always probe
     if evaluation.is_vague or evaluation.is_incomplete:
         return "follow_up"
 
-    # Rules 3 & 4: strong answers
     if evaluation.is_strong:
         return "new_question" if evaluation.depth >= 8 else "follow_up"
 
-    # Rule 5: default
     return "new_question"
 
 
 def generate_follow_up(evaluation: Evaluation, question: str, answer: str) -> str:
     """
-    Generate a targeted follow-up question.  Kept for completeness; the dialogue
-    manager uses question_generator.generate_follow_up in practice.
+    Generate a targeted follow-up question based on the evaluation.
+    (Retained for completeness — question_generator.generate_follow_up is
+    the one used by the dialogue manager in production.)
     """
-    system_prompt = (
-        "You are a senior technical interviewer. The candidate gave an answer that "
-        "warrants a follow-up.\n\n"
-        f"Original Question: {question}\n"
-        f"Candidate's Answer: {answer}\n\n"
-        "Evaluation context:\n"
-        f"- Vague: {evaluation.is_vague}\n"
-        f"- Incomplete: {evaluation.is_incomplete}\n"
-        f"- Strong: {evaluation.is_strong}\n"
-        f"- Strengths: {', '.join(evaluation.strengths) if evaluation.strengths else 'None'}\n"
-        f"- Missing points: {', '.join(evaluation.missing_points) if evaluation.missing_points else 'None'}\n\n"
-        "Rules:\n"
-        "- Vague/incomplete → ask to clarify, elaborate, or give a concrete example.\n"
-        "- Strong → escalate slightly (edge cases, trade-offs, improvement ideas).\n"
-        "- Keep it concise (1-2 sentences). Do not introduce a new topic.\n"
-        "Return ONLY the follow-up question text."
+    missing = ", ".join(evaluation.missing_points) if evaluation.missing_points else "none identified"
+    strengths = ", ".join(evaluation.strengths) if evaluation.strengths else "none identified"
+
+    system_prompt = """\
+You are a senior technical interviewer. The candidate's last answer was evaluated and \
+warrants a follow-up question. Your follow-up should feel like a natural continuation \
+of the conversation — warm, precise, and intellectually curious.\
+"""
+
+    user_prompt = (
+        f"Original question: {question}\n"
+        f"Candidate's answer: {answer}\n\n"
+        f"Evaluation summary:\n"
+        f"  - Vague: {evaluation.is_vague}\n"
+        f"  - Incomplete: {evaluation.is_incomplete}\n"
+        f"  - Strong: {evaluation.is_strong}\n"
+        f"  - Strengths in the answer: {strengths}\n"
+        f"  - What was missing: {missing}\n\n"
+        "Write one follow-up question (1–2 sentences) that:\n"
+        "- If vague/incomplete: asks the candidate to be concrete — give an example, "
+        "name a tool, or walk through a specific step.\n"
+        "- If strong but shallow: escalates slightly — a trade-off, an edge case, "
+        "or a production consideration.\n"
+        "Do not introduce a new topic. Output only the question text."
     )
 
     response = _get_client().chat.completions.create(
         model="gpt-4o",
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "Generate the follow-up question."},
+            {"role": "user",   "content": user_prompt},
         ],
+        max_tokens=150,
     )
     return response.choices[0].message.content.strip()
