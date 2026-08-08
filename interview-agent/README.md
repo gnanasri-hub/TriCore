@@ -1,8 +1,9 @@
 # AI Interview Agent
 
-A GPT-4o–powered technical interview agent for the TriCore 31-day AI engineering cohort.
-It reads a candidate's mission history, dynamically selects curriculum topics to probe,
-conducts a natural multi-turn conversation, and produces a structured feedback report.
+A Groq-powered (llama-3.3-70b-versatile) technical interview agent for the TriCore
+31-day AI engineering cohort. It reads a candidate's mission history, dynamically
+selects curriculum topics to probe, conducts a natural multi-turn conversation, and
+produces a structured feedback report.
 
 ---
 
@@ -16,12 +17,11 @@ POST /api/interview
 
 Start  →  { sessionId, candidate: {...} }  →  { reply, done: false }
 Turn   →  { sessionId, message: "..." }    →  { reply, done: false }
-End    →  { sessionId, message: "..." }    →  { reply, done: true, feedback: {...} }
+End    →  { sessionId, message: "..." }    →  { reply: "Interview completed.", done: true, feedback: {...} }
 ```
 
 State is kept in memory, keyed by the `sessionId` you provide.
-The session persists until the server restarts — it is your responsibility to send
-the same `sessionId` on every turn.
+The session persists until the server restarts.
 
 ### How the candidate's mission history is used
 
@@ -34,15 +34,28 @@ When you send a candidate object, the agent builds a **structured profile**:
 | `skipped_days` / `failed_days` | Missions with `skipped: true` or `passed: false` | Guaranteed to be asked before any other topic |
 | `job_role` | `member.jobRole` | Used for FAISS semantic matching when no weak days remain |
 | `experience_level` | Derived from `yearsExperience` (< 3 → Junior, ≤ 5 → Mid-level, > 5 → Senior) | Calibrates question difficulty |
+| `attempts_by_day` | Per-day attempt count | Exact depth calibration in LLM prompt |
 
 Topic selection priority (Tier 1 → 4):
 
-1. **Skipped + failed days** — the agent always probes these first, giving the candidate a chance to redeem them
+1. **Skipped + failed days** — always probed first; foundational questions, encouraging tone
 2. **Job-role semantic match** — FAISS finds the most relevant curriculum days for the candidate's role
-3. **Strong topics** — deep architectural questions on areas the candidate aced
+3. **Strong topics** — deep architectural questions on areas the candidate aced (≤ 2 attempts)
 4. **Fallback** — any remaining uncovered curriculum day
 
-The interview ends after **at least 8 questions** have been asked across **at least 4 distinct curriculum days**.
+The interview ends after **at least 8 questions** across **at least 4 distinct curriculum days**.
+
+### Intelligent follow-up logic
+
+After each answer the evaluator classifies it and decides the next action:
+
+| Answer quality | Action | What happens |
+|---|---|---|
+| Vague / too short / incomplete | `follow_up_clarify` | Probe for concrete example, tool, or step |
+| Strong but shallow (depth < 8) | `follow_up_escalate` | Push to production edge case or trade-off |
+| Strong and deep (depth ≥ 8) | `new_question` | Move to next curriculum topic |
+| Average | `new_question` | Move on |
+| Already on a follow-up | `new_question` | Hard cap — follow-ups never chain |
 
 ---
 
@@ -51,7 +64,9 @@ The interview ends after **at least 8 questions** have been asked across **at le
 ### Prerequisites
 
 - Python 3.10+
-- An OpenAI API key with access to `gpt-4o` and `text-embedding-3-small`
+- A **Groq API key** (free tier available at [console.groq.com](https://console.groq.com))
+- An **OpenAI API key** — used only for FAISS embedding generation at startup
+  (the pre-built index in `data/curriculum.faiss` means this is rarely needed)
 
 ### 1. Install dependencies
 
@@ -66,24 +81,96 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Open `.env` and set your key:
+Open `.env` and set both keys:
 
 ```
-OPENAI_API_KEY=sk-...
+GROQ_API_KEY=gsk_...
+OPENAI_API_KEY=sk-...    # only needed if curriculum.faiss is missing
 ```
 
 ### 3. Start the server
 
 ```bash
+cd interview-agent
 uvicorn app.main:app --reload
 ```
 
 The server starts on `http://127.0.0.1:8000`.
-On first boot, the FAISS curriculum index is loaded from `data/curriculum.faiss`.
-If the index file is missing it will be rebuilt automatically (requires an OpenAI API call
-to embed the 31-day curriculum — takes ~5 seconds).
+On first boot the FAISS curriculum index loads from `data/curriculum.faiss` (pre-built).
+Interactive API docs: `http://127.0.0.1:8000/docs`.
 
-Interactive API docs are available at `http://127.0.0.1:8000/docs`.
+---
+
+## How to Demo
+
+Run the full end-to-end HTTP demo against a live server:
+
+```bash
+# 1. Start the server in one terminal
+cd interview-agent
+uvicorn app.main:app --reload
+
+# 2. In a second terminal, run the demo script
+cd interview-agent
+python scripts/full_interview_demo.py
+```
+
+The demo script (`scripts/full_interview_demo.py`):
+- Loads **CAND-001** (Sarah Johnson, Senior Data Engineer)
+- Starts the interview via `POST /api/interview`
+- Simulates **8–10 turns** with a mix of strong, vague, and follow-up answers
+- Prints **every request and response** with clear labels and colour
+- Runs until `done=true` and prints the full `feedback` object
+- Ends with a **proof summary** confirming all Problem Statement requirements
+
+Example output (abbreviated):
+
+```
+══════════════════════════════════════════════════════════════════════
+  AI Interview Agent — Full End-to-End HTTP Demo
+══════════════════════════════════════════════════════════════════════
+
+  Candidate : Sarah Johnson (CAND-001)
+  Role      : Senior Data Engineer  |  9 years experience
+
+  ▶ REQUEST [START]
+  ...
+  ◀ RESPONSE [done=false]  HTTP 200
+  reply: "Welcome to the interview, Sarah..."
+
+  ▶ REQUEST [TURN 1]
+  message: "I'm not sure, I think it has something to do with logging."
+  ◀ RESPONSE [done=false]  HTTP 200
+  reply: "That's a start — could you walk me through..."
+  [state] follow_up_pending=True (type=clarify)
+
+  ...
+
+  ◀ RESPONSE [FINAL — done=true]  HTTP 200
+  reply: "Interview completed."
+
+  ╔══ FEEDBACK OBJECT ══════════════════════════════════╗
+  summary: Sarah Johnson demonstrated strong command of ...
+  strengths: ✔ Articulated the FAISS IVF-PQ trade-offs...
+  gaps:      ✘ Did not demonstrate understanding of ...
+  next:      → Implement a monitoring pipeline using ...
+  ╚═════════════════════════════════════════════════════╝
+
+══════════════════════════════════════════════════════════════════════
+  PROOF SUMMARY — Problem Statement Requirements
+══════════════════════════════════════════════════════════════════════
+  ✔  Single endpoint POST /api/interview
+  ✔  reply == "Interview completed."
+  ✔  done = true
+  ✔  Total questions >= 8
+  ✔  Distinct curriculum days >= 4
+  ✔  Follow-up(s) triggered
+  ✔  feedback has all 4 required fields
+  ✔  feedback arrays are non-empty and specific
+  ✔  State maintained by sessionId (in-memory)
+
+  ALL REQUIREMENTS SATISFIED ✓
+```
 
 ---
 
@@ -132,11 +219,11 @@ Response:
 { "reply": "That's a solid foundation — let's go a level deeper...", "done": false }
 ```
 
-**Final response (when done)**
+**Final response (when interview is complete)**
 
 ```json
 {
-  "reply": "Thank you — that wraps up our interview...",
+  "reply": "Interview completed.",
   "done": true,
   "feedback": {
     "summary": "...",
@@ -144,6 +231,20 @@ Response:
     "gaps":      ["...", "..."],
     "next":      ["...", "..."]
   }
+}
+```
+
+### `GET /api/interview/status?sessionId=...`
+
+Returns session counters for debugging:
+
+```json
+{
+  "sessionId": "abc-123",
+  "question_count": 8,
+  "covered_days": [7, 8, 12, 29],
+  "interview_stage": "COMPLETED",
+  "pending_follow_up": { "is_pending": false, ... }
 }
 ```
 
@@ -160,102 +261,40 @@ Response:
 
 ---
 
-## Multi-turn curl walkthrough
-
-The commands below run a full mini-interview against CAND-011 (Mia Alvarez),
-who skipped Days 7, 8, 12, 16, and 22. Notice the agent probes those skipped topics first.
-
-> **Windows users:** replace `'` with `"` and escape inner quotes, or use PowerShell's
-> `Invoke-RestMethod` / a tool like Postman.
-
-### Turn 0 — Start
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/api/interview \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "demo-mia-001",
-    "candidate": {
-      "member": {
-        "id": "CAND-011",
-        "name": "Mia Alvarez",
-        "jobRole": "UX Researcher",
-        "yearsExperience": 6
-      },
-      "missions": [
-        { "day": 1,  "title": "VS Code & Python Setup",          "passed": true,  "attempts": 2 },
-        { "day": 4,  "title": "Reading Structured Data",          "passed": true,  "attempts": 2 },
-        { "day": 7,  "title": "Embeddings Explained",             "skipped": true },
-        { "day": 8,  "title": "Vector Databases Overview",        "skipped": true },
-        { "day": 12, "title": "Prompt Engineering Fundamentals",  "skipped": true },
-        { "day": 16, "title": "Chatbot Backend & API Integration","skipped": true },
-        { "day": 22, "title": "Multi-Agent Orchestration",        "skipped": true },
-        { "day": 31, "title": "Capstone Project & Final Demo",    "passed": true,  "attempts": 4 }
-      ],
-      "signals": { "commitDays": 9, "missionsCompleted": 14, "missionsFirstTry": 5 }
-    }
-  }'
-```
-
-Expected response shape:
-```json
-{ "reply": "Hi Mia! ... embeddings ...", "done": false }
-```
-
-### Turn 1 — Answer the first question
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/api/interview \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "demo-mia-001",
-    "message": "An embedding is a way to represent text as numbers so a computer can compare meaning, not just exact words."
-  }'
-```
-
-### Turn 2 — Answer the follow-up (or next question)
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/api/interview \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sessionId": "demo-mia-001",
-    "message": "I think dense embeddings capture semantic meaning while sparse ones like BM25 focus on keyword frequency."
-  }'
-```
-
-### Subsequent turns
-
-Continue sending `{ "sessionId": "demo-mia-001", "message": "..." }` until `done: true`.
-The response will include a `feedback` object when the interview is complete.
-
----
-
 ## Running the test suite
 
-All 77 tests run offline — no OpenAI API key required.
+All 77 tests run offline — no API key required.
 
 ```bash
 cd interview-agent
 python -m pytest tests/ -v
 ```
 
-Expected output:
-
-```
-77 passed in ~4s
-```
-
-Individual test files and what they cover:
+Expected output: `77 passed`
 
 | File | Coverage |
 |------|----------|
-| `test_profile_parsing.py` | Candidate archetype parsing (strong / skipped / failed / mixed) |
+| `test_profile_parsing.py` | Candidate profile parsing (strong / skipped / failed / mixed) |
 | `test_select_next_day.py` | Topic selection tier priority and no-repeat invariants |
-| `test_evaluator.py` | Min-length guard, derived properties, all 6 `decide_next_action` branches |
-| `test_should_end.py` | Ending gate (≥ 8 questions AND ≥ 4 days, duplicate dedup) |
+| `test_evaluator.py` | Min-length guard, derived properties, all `decide_next_action` branches |
+| `test_should_end.py` | Ending gate (≥ 8 questions AND ≥ 4 days) |
 | `test_feedback_schema.py` | Feedback schema compliance and graceful fallback |
 | `test_api_validation.py` | HTTP 400 / 404 / 409 / 410 / 422 / 200 + response shapes |
+
+---
+
+## Verification scripts
+
+These scripts require a running server and a valid `GROQ_API_KEY`:
+
+| Script | What it verifies |
+|--------|-----------------|
+| `python verify_tests.py` | Basic API contract (single endpoint, start, turn, state isolation) |
+| `python test_full_interview.py` | Full interview: ≥ 8 questions, ≥ 4 days, `done=true` |
+| `python test_personalization.py` | CAND-003/010/011 get depth-appropriate questions |
+| `python test_follow_up_logic.py` | Vague → clarify, strong → escalate, hard cap enforced |
+| `python test_feedback_structure.py` | `reply="Interview completed."`, feedback specificity |
+| `python scripts/full_interview_demo.py` | Full end-to-end HTTP demo with proof summary |
 
 ---
 
@@ -264,41 +303,32 @@ Individual test files and what they cover:
 ```
 interview-agent/
 ├── app/
-│   ├── main.py               # FastAPI app + POST /api/interview endpoint
+│   ├── main.py               # FastAPI app — POST /api/interview + GET /api/interview/status
 │   ├── schemas.py            # Pydantic models (InterviewRequest, InterviewResponse, Feedback, SessionState)
-│   ├── config.py             # Environment config and file paths
-│   ├── session_store.py      # In-memory session store
+│   ├── config.py             # Environment config, file paths, GROQ_MODEL
+│   ├── session_store.py      # In-memory session store (dict keyed by sessionId)
 │   └── services/
-│       ├── data_manager.py       # FAISS index lifecycle + candidate profile builder
-│       ├── dialogue_manager.py   # Interview orchestration (start, process, end)
-│       ├── evaluator.py          # GPT-4o answer evaluation + next-action decision
-│       ├── feedback_generator.py # Final structured feedback generation
-│       └── question_generator.py # Calibrated question + follow-up generation
+│       ├── data_manager.py       # FAISS index lifecycle, candidate profile builder, Groq/OpenAI clients
+│       ├── dialogue_manager.py   # Interview orchestration (start, process, end, should_end)
+│       ├── evaluator.py          # Answer evaluation + follow-up decision (clarify/escalate/new_question)
+│       ├── feedback_generator.py # Final structured feedback with validation + retry
+│       └── question_generator.py # Depth-calibrated question and follow-up generation
 ├── data/
 │   ├── candidates.json       # 20 sample candidate records
 │   ├── curriculum.json       # 31-day AI engineering curriculum
-│   ├── curriculum.faiss      # Pre-built FAISS index (rebuilt automatically if missing)
+│   ├── curriculum.faiss      # Pre-built FAISS index
 │   └── metadata.json         # FAISS index metadata
 ├── scripts/
-│   └── full_demo.py          # End-to-end CLI demo (no server required)
+│   ├── full_demo.py              # Direct (no-server) demo via dialogue_manager
+│   └── full_interview_demo.py    # HTTP end-to-end demo with proof summary
 ├── tests/                    # 77 offline unit tests
+├── verify_tests.py           # Basic API contract checks
+├── test_full_interview.py    # Minimum requirements test
+├── test_personalization.py   # Depth calibration per candidate archetype
+├── test_follow_up_logic.py   # Follow-up logic (clarify / escalate / hard cap)
+├── test_feedback_structure.py# Spec-compliant feedback structure and specificity
 ├── .env.example
 ├── pytest.ini
 ├── requirements.txt
 └── README.md
-```
-
----
-
-## Running the demo script
-
-The demo script drives a complete interview directly against the dialogue manager,
-without needing a running server. Requires a valid `OPENAI_API_KEY` in `.env`.
-
-```bash
-cd interview-agent
-python scripts/full_demo.py           # uses CAND-003 (Emily Chen — all first-try)
-python scripts/full_demo.py CAND-011  # Mia Alvarez — many skipped topics
-python scripts/full_demo.py CAND-010  # Gerald Combs — failed missions
-python scripts/full_demo.py CAND-016  # Isabella Rossi — mixed failed + skipped
 ```
