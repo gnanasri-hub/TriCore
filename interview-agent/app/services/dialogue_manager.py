@@ -8,8 +8,9 @@ from app.services import data_manager, evaluator, question_generator, feedback_g
 logger = logging.getLogger(__name__)
 
 # ── Ending criteria ────────────────────────────────────────────────────────────
-MIN_QUESTIONS = 8
-MIN_DAYS = 4
+MIN_QUESTIONS = 8   # minimum total questions (including follow-ups) before ending
+MIN_DAYS = 4        # minimum distinct curriculum days covered before ending
+
 
 # ── Session helpers ────────────────────────────────────────────────────────────
 
@@ -28,50 +29,64 @@ def _save_state(session_id: str, state: SessionState) -> None:
 # ── Topic selection ────────────────────────────────────────────────────────────
 
 def _select_next_day(
-    candidate_profile: Dict[str, Any], covered_days: List[int]
+    candidate_profile: Dict[str, Any],
+    covered_days: List[int],
+    current_day: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Pick the next curriculum day using a four-tier priority:
-      1. Skipped or failed days not yet covered.
-      2. Job-role-relevant days via FAISS semantic search.
-      3. Strong-topic days (completed in ≤ 2 attempts) not yet covered.
-      4. Any remaining uncovered day.
+    Pick the next curriculum day using a strict four-tier priority:
+
+      1. Skipped or failed days not yet covered  ← guaranteed probing
+      2. Job-role-relevant days via FAISS semantic search
+      3. Strong-topic days (completed in ≤ 2 attempts) not yet covered
+      4. Any remaining uncovered day
+
+    The current_day is always excluded from selection so the same topic
+    is never repeated back-to-back.
     """
     all_days = data_manager.get_all_days_metadata()
     if not all_days:
         logger.warning("No curriculum days metadata available.")
         return None
 
-    covered_set = set(covered_days)
+    # Build exclusion set: already covered + the day we just finished
+    excluded = set(covered_days)
+    if current_day is not None:
+        excluded.add(current_day)
 
-    # 1. Probe weak/skipped days first
+    # ── Tier 1: probe skipped and failed days first ───────────────────────────
     weak_nums = set(
         candidate_profile.get("skipped_days", [])
         + candidate_profile.get("failed_days", [])
     )
-    available_weak = [d for d in all_days if d["day"] in weak_nums and d["day"] not in covered_set]
+    available_weak = [d for d in all_days if d["day"] in weak_nums and d["day"] not in excluded]
     if available_weak:
+        logger.debug("Tier-1 (weak/skipped) day selected: %s", available_weak[0]["day"])
         return available_weak[0]
 
-    # 2. Job-role semantic match
+    # ── Tier 2: job-role semantic match ──────────────────────────────────────
     job_role = candidate_profile.get("job_role", "")
     if job_role:
         relevant = data_manager.retrieve_relevant_days(job_role, top_k=10)
-        available_relevant = [d for d in relevant if d["day"] not in covered_set]
+        available_relevant = [d for d in relevant if d["day"] not in excluded]
         if available_relevant:
             day_num = available_relevant[0]["day"]
-            return data_manager.get_day_metadata(day_num)
+            meta = data_manager.get_day_metadata(day_num)
+            logger.debug("Tier-2 (job-role) day selected: %s", day_num)
+            return meta
 
-    # 3. Strong topics
+    # ── Tier 3: strong topics (probe depth) ──────────────────────────────────
     completed_set = set(candidate_profile.get("completed_days", []))
     strong_nums = completed_set - weak_nums
-    available_strong = [d for d in all_days if d["day"] in strong_nums and d["day"] not in covered_set]
+    available_strong = [d for d in all_days if d["day"] in strong_nums and d["day"] not in excluded]
     if available_strong:
+        logger.debug("Tier-3 (strong topics) day selected: %s", available_strong[0]["day"])
         return available_strong[0]
 
-    # 4. Fallback: any uncovered day
-    available_fallback = [d for d in all_days if d["day"] not in covered_set]
+    # ── Tier 4: fallback ──────────────────────────────────────────────────────
+    available_fallback = [d for d in all_days if d["day"] not in excluded]
     if available_fallback:
+        logger.debug("Tier-4 (fallback) day selected: %s", available_fallback[0]["day"])
         return available_fallback[0]
 
     return None
@@ -82,9 +97,9 @@ def _select_next_day(
 def start_interview(session_id: str, candidate_data: Dict[str, Any]) -> str:
     """
     Initialise a new session: profile the candidate, select the first topic,
-    generate the welcome + opening question, persist state and return the reply.
+    generate the opening question, persist state, and return the reply string.
 
-    Raises ValueError if called on a session that already exists.
+    Raises ValueError if a session with session_id already exists.
     """
     if session_store.get_session(session_id) is not None:
         raise ValueError(f"Session '{session_id}' already exists.")
@@ -92,8 +107,8 @@ def start_interview(session_id: str, candidate_data: Dict[str, Any]) -> str:
     # 1. Build structured profile
     profile = data_manager.get_candidate_profile(candidate_data)
 
-    # 2. Select first curriculum day
-    first_day_meta = _select_next_day(profile, [])
+    # 2. Select first curriculum day (pass empty covered list + no current day)
+    first_day_meta = _select_next_day(profile, covered_days=[], current_day=None)
     if not first_day_meta:
         raise ValueError("No curriculum day available to start the interview.")
 
@@ -107,7 +122,7 @@ def start_interview(session_id: str, candidate_data: Dict[str, Any]) -> str:
         qa_records=[],
         covered_days=[day_num],
         current_day=day_num,
-        question_count=0,           # incremented by generate_question below
+        question_count=0,           # incremented after generating first question
         pending_follow_up={
             "is_pending": False,
             "follow_up_question": "",
@@ -117,7 +132,7 @@ def start_interview(session_id: str, candidate_data: Dict[str, Any]) -> str:
         interview_stage="INTERVIEWING",
     )
 
-    # 4. Generate opening question (includes welcome preamble from GPT)
+    # 4. Generate opening question
     opening = question_generator.generate_question(state)
     state.history.append({"role": "assistant", "content": opening})
     state.question_count += 1
@@ -129,11 +144,15 @@ def start_interview(session_id: str, candidate_data: Dict[str, Any]) -> str:
 
 def should_end(state: SessionState) -> bool:
     """
-    End the interview once both minimum thresholds are met:
-      - At least MIN_QUESTIONS questions have been asked.
-      - At least MIN_DAYS distinct curriculum days have been covered.
+    End only when BOTH thresholds are met:
+      - At least MIN_QUESTIONS total questions asked (includes follow-ups)
+      - At least MIN_DAYS distinct curriculum days covered
+    This prevents premature endings even if follow-ups inflate the count quickly.
     """
-    return state.question_count >= MIN_QUESTIONS and len(state.covered_days) >= MIN_DAYS
+    return (
+        state.question_count >= MIN_QUESTIONS
+        and len(set(state.covered_days)) >= MIN_DAYS
+    )
 
 
 def _build_qa_record(
@@ -144,8 +163,8 @@ def _build_qa_record(
     eval_result: evaluator.Evaluation,
 ) -> Dict[str, Any]:
     """
-    Build a flat Q&A record compatible with feedback_generator's expectations.
-    Stores both the raw evaluation scores and the derived fields.
+    Build a flat Q&A record consumed by feedback_generator.generate_feedback.
+    Stores both derived flags and raw evaluation scores.
     """
     return {
         "day": day_num,
@@ -154,9 +173,9 @@ def _build_qa_record(
         "answer": answer,
         # Derived flags
         "is_vague": eval_result.is_vague,
-        "is_correct": eval_result.is_correct,          # @property on Evaluation
-        "evaluation_notes": eval_result.evaluation_notes,  # @property → overall_comment
-        # Raw scores — consumed by feedback_generator for richer summaries
+        "is_correct": eval_result.is_correct,
+        "evaluation_notes": eval_result.evaluation_notes,
+        # Raw scores for richer feedback summaries
         "technical_accuracy": eval_result.technical_accuracy,
         "depth": eval_result.depth,
         "strengths": eval_result.strengths,
@@ -164,29 +183,50 @@ def _build_qa_record(
     }
 
 
+def _end_interview(
+    session_id: str,
+    state: SessionState,
+    closing_line: str,
+) -> InterviewResponse:
+    """Generate feedback, mark session completed, persist, return final response."""
+    fb = feedback_generator.generate_feedback(state.candidate_profile, state.qa_records)
+    state.interview_stage = "COMPLETED"
+    _save_state(session_id, state)
+    return InterviewResponse(
+        reply=closing_line,
+        done=True,
+        feedback=Feedback(**fb),
+    )
+
+
 def process_message(session_id: str, message: str) -> InterviewResponse:
     """
-    Handle one conversation turn:
-      1. Load session state — 404 if missing.
-      2. Evaluate the candidate's answer against the last question.
-      3. Decide: follow-up | new_question | end.
-         - follow_up  → generate & return follow-up question (done=false).
-         - end        → generate feedback, return done=true + feedback object.
-         - new_question → select next day, generate question, return done=false.
+    Handle one conversation turn.
+
+    Flow:
+      1. Load and validate session state.
+      2. Evaluate the candidate's answer against the last asked question.
+      3. decide_next_action → follow_up | new_question | end
+         - follow_up  → generate follow-up, return done=False
+         - end / thresholds met → generate feedback, return done=True
+         - new_question → select next day, generate question, return done=False
+
+    Raises:
+        KeyError  – session_id not found in store
+        ValueError – session is already completed
     """
     state = _load_state(session_id)
     if state is None:
         raise KeyError(f"Session '{session_id}' not found.")
-
     if state.interview_stage == "COMPLETED":
         raise ValueError(f"Session '{session_id}' is already completed.")
 
     profile = state.candidate_profile
     current_day = state.current_day
     current_day_meta = data_manager.get_day_metadata(current_day) if current_day else None
-
-    # ── Determine the question that prompted this answer ──────────────────────
     pending = state.pending_follow_up
+
+    # ── Identify the question that prompted this answer ───────────────────────
     if pending.get("is_pending"):
         last_question = pending["follow_up_question"]
     else:
@@ -195,22 +235,25 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
             "",
         )
 
-    # ── 1. Evaluate the answer ────────────────────────────────────────────────
+    # ── 1. Evaluate ───────────────────────────────────────────────────────────
     eval_result = evaluator.evaluate_answer(
         question=last_question,
         answer=message,
         curriculum_context=current_day_meta or {},
     )
-
-    # Append user turn to history
     state.history.append({"role": "user", "content": message})
 
-    # ── 2. Decide next action ────────────────────────────────────────────────
+    # ── 2. Decide ─────────────────────────────────────────────────────────────
     action = evaluator.decide_next_action(eval_result, state)
 
-    # ── 3a. Follow-up branch ──────────────────────────────────────────────────
+    # ── 3a. Follow-up ─────────────────────────────────────────────────────────
     if action == "follow_up":
-        logger.info("Generating follow-up for session %s (day %s).", session_id, current_day)
+        logger.info(
+            "Session %s: follow-up triggered on day %s (vague=%s incomplete=%s strong=%s depth=%d)",
+            session_id, current_day,
+            eval_result.is_vague, eval_result.is_incomplete,
+            eval_result.is_strong, eval_result.depth,
+        )
         follow_up_text = question_generator.generate_follow_up(
             last_question, message, state.history
         )
@@ -225,9 +268,8 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
         _save_state(session_id, state)
         return InterviewResponse(reply=follow_up_text, done=False)
 
-    # ── Commit QA record (for both new_question and end paths) ───────────────
+    # ── Commit Q&A record (shared by new_question and end paths) ─────────────
     if pending.get("is_pending"):
-        # Combine the vague initial answer with the follow-up answer
         combined_answer = (
             f"Initial: {pending['vague_answer']} | Follow-up: {message}"
         )
@@ -235,6 +277,7 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
             current_day, current_day_meta,
             pending["original_question"], combined_answer, eval_result,
         )
+        # Reset pending follow-up
         state.pending_follow_up = {
             "is_pending": False,
             "follow_up_question": "",
@@ -251,28 +294,22 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
 
     # ── 3b. End interview ─────────────────────────────────────────────────────
     if action == "end" or should_end(state):
-        logger.info("Ending interview for session %s.", session_id)
-        fb = feedback_generator.generate_feedback(profile, state.qa_records)
-        state.interview_stage = "COMPLETED"
-        _save_state(session_id, state)
-        return InterviewResponse(
-            reply="Thank you — that wraps up our interview. I'll share your feedback below.",
-            done=True,
-            feedback=Feedback(**fb),
+        logger.info(
+            "Session %s ending: question_count=%d covered_days=%d",
+            session_id, state.question_count, len(set(state.covered_days)),
+        )
+        return _end_interview(
+            session_id, state,
+            "Thank you — that wraps up our interview. I'll share your feedback below.",
         )
 
     # ── 3c. Next question ─────────────────────────────────────────────────────
-    next_day_meta = _select_next_day(profile, state.covered_days)
+    next_day_meta = _select_next_day(profile, state.covered_days, state.current_day)
     if next_day_meta is None:
-        # Ran out of curriculum days — wrap up gracefully
-        logger.info("No more curriculum days. Ending session %s early.", session_id)
-        fb = feedback_generator.generate_feedback(profile, state.qa_records)
-        state.interview_stage = "COMPLETED"
-        _save_state(session_id, state)
-        return InterviewResponse(
-            reply="We've covered everything on our agenda. Let me share your feedback.",
-            done=True,
-            feedback=Feedback(**fb),
+        logger.info("Session %s: no more curriculum days — ending early.", session_id)
+        return _end_interview(
+            session_id, state,
+            "We've covered everything on our agenda. Let me share your feedback.",
         )
 
     next_day_num = next_day_meta["day"]

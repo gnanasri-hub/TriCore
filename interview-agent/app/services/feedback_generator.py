@@ -1,13 +1,20 @@
 import os
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from openai import OpenAI
 from app.schemas import Feedback
 
 logger = logging.getLogger(__name__)
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Lazy singleton — instantiated on first use so tests can import without a key.
+_client: Optional[OpenAI] = None
+
+def _get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        _client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    return _client
 
 
 def generate_feedback(profile: Dict[str, Any], qa_records: List[Dict[str, Any]]) -> dict:
@@ -89,7 +96,7 @@ def generate_feedback(profile: Dict[str, Any], qa_records: List[Dict[str, Any]])
     )
 
     try:
-        response = client.beta.chat.completions.parse(
+        response = _get_client().beta.chat.completions.parse(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt},
