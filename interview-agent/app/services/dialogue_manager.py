@@ -188,14 +188,14 @@ def _build_qa_record(
 def _end_interview(
     session_id: str,
     state: SessionState,
-    closing_line: str,
+    closing_line: str = "Interview completed.",
 ) -> InterviewResponse:
     """Generate feedback, mark session completed, persist, return final response."""
     fb = feedback_generator.generate_feedback(state.candidate_profile, state.qa_records)
     state.interview_stage = "COMPLETED"
     _save_state(session_id, state)
     return InterviewResponse(
-        reply=closing_line,
+        reply="Interview completed.",   # exact string required by technical-spec.md
         done=True,
         feedback=Feedback(**fb),
     )
@@ -303,10 +303,7 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
             "Session %s ending: question_count=%d covered_days=%d",
             session_id, state.question_count, len(set(state.covered_days)),
         )
-        return _end_interview(
-            session_id, state,
-            "Thank you — that wraps up our interview. I'll share your feedback below.",
-        )
+        return _end_interview(session_id, state)
 
     # ── 3c. Next question ─────────────────────────────────────────────────────
     next_day_meta = _select_next_day(profile, state.covered_days, state.current_day)
@@ -325,10 +322,7 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
     if next_day_meta is None:
         # Truly nothing left (single-day curriculum edge case) — end regardless.
         logger.warning("Session %s: no days available at all, ending.", session_id)
-        return _end_interview(
-            session_id, state,
-            "We've covered everything on our agenda. Let me share your feedback.",
-        )
+        return _end_interview(session_id, state)
 
     next_day_num = next_day_meta["day"]
     state.covered_days.append(next_day_num)
