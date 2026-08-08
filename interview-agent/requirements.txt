@@ -3,6 +3,7 @@ uvicorn
 pydantic>=2.0.0
 pydantic-settings
 openai
+groq
 faiss-cpu
 python-dotenv
 numpy

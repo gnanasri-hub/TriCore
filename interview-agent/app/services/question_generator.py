@@ -2,6 +2,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from app.schemas import SessionState
 from app.services import data_manager
+from app import config
 
 logger = logging.getLogger(__name__)
 
@@ -310,10 +311,10 @@ Recent conversation:
 Generate exactly one interview question. Output the question text only — no labels, \
 no preamble, no quotation marks."""
 
-    client = data_manager.get_openai_client()
+    client = data_manager.get_groq_client()
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=config.GROQ_MODEL,
             messages=[
                 {"role": "system", "content": _INTERVIEWER_SYSTEM},
                 {"role": "user",   "content": user_prompt},

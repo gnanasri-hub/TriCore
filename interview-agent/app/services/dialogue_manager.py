@@ -8,7 +8,7 @@ from app.services import data_manager, evaluator, question_generator, feedback_g
 logger = logging.getLogger(__name__)
 
 # ── Ending criteria ────────────────────────────────────────────────────────────
-MIN_QUESTIONS = 8   # minimum total questions (including follow-ups) before ending
+MIN_QUESTIONS = 8   # minimum total questions asked (including follow-ups) before ending
 MIN_DAYS = 4        # minimum distinct curriculum days covered before ending
 
 
@@ -144,15 +144,17 @@ def start_interview(session_id: str, candidate_data: Dict[str, Any]) -> str:
 
 def should_end(state: SessionState) -> bool:
     """
-    End only when BOTH thresholds are met:
+    End ONLY when BOTH hard minimums are satisfied:
       - At least MIN_QUESTIONS total questions asked (includes follow-ups)
       - At least MIN_DAYS distinct curriculum days covered
-    This prevents premature endings even if follow-ups inflate the count quickly.
+
+    Both conditions must be true simultaneously. This is the single source of
+    truth for ending — no other code path may end the interview without calling
+    this guard first.
     """
-    return (
-        state.question_count >= MIN_QUESTIONS
-        and len(set(state.covered_days)) >= MIN_DAYS
-    )
+    questions_ok = state.question_count >= MIN_QUESTIONS
+    days_ok      = len(set(state.covered_days)) >= MIN_DAYS
+    return questions_ok and days_ok
 
 
 def _build_qa_record(
@@ -292,8 +294,8 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
 
     state.qa_records.append(qa_rec)
 
-    # ── 3b. End interview ─────────────────────────────────────────────────────
-    if action == "end" or should_end(state):
+    # ── 3b. End interview — only if BOTH hard minimums are met ──────────────
+    if should_end(state):
         logger.info(
             "Session %s ending: question_count=%d covered_days=%d",
             session_id, state.question_count, len(set(state.covered_days)),
@@ -306,7 +308,20 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
     # ── 3c. Next question ─────────────────────────────────────────────────────
     next_day_meta = _select_next_day(profile, state.covered_days, state.current_day)
     if next_day_meta is None:
-        logger.info("Session %s: no more curriculum days — ending early.", session_id)
+        # No uncovered days left — but we still must respect the hard minimums.
+        # Re-open already-covered days (excluding current) so we can keep asking.
+        logger.info(
+            "Session %s: all days exhausted (q=%d days=%d) — recycling covered days.",
+            session_id, state.question_count, len(set(state.covered_days)),
+        )
+        all_days = data_manager.get_all_days_metadata()
+        # Pick any day that is not the current one
+        recycled = [d for d in all_days if d["day"] != state.current_day]
+        next_day_meta = recycled[0] if recycled else None
+
+    if next_day_meta is None:
+        # Truly nothing left (single-day curriculum edge case) — end regardless.
+        logger.warning("Session %s: no days available at all, ending.", session_id)
         return _end_interview(
             session_id, state,
             "We've covered everything on our agenda. Let me share your feedback.",

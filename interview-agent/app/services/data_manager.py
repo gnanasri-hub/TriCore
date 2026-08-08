@@ -4,35 +4,46 @@ from typing import Dict, Any, List, Optional
 import numpy as np
 import faiss
 from openai import OpenAI
+from groq import Groq
 
 from app import config
 
 logger = logging.getLogger(__name__)
 
-# Global variables to hold the loaded index and metadata
-_index: Optional[faiss.IndexFlatIP] = None
-_metadata: Optional[List[Dict[str, Any]]] = None
-
-# OpenAI Client instance
-_client: Optional[OpenAI] = None
-
-# Cached curriculum details for candidate profiling
+# ── Singletons ────────────────────────────────────────────────────────────────
+_index:            Optional[faiss.IndexFlatIP] = None
+_metadata:         Optional[List[Dict[str, Any]]] = None
+_openai_client:    Optional[OpenAI] = None
+_groq_client:      Optional[Groq]   = None
 _curriculum_cache: Optional[Dict[str, Any]] = None
 
+
 def get_openai_client() -> OpenAI:
-    """
-    Get or instantiate the OpenAI client.
-    """
-    global _client
-    if _client is None:
+    """OpenAI client — used only for embeddings."""
+    global _openai_client
+    if _openai_client is None:
         api_key = config.OPENAI_API_KEY
         if not api_key:
             raise ValueError(
                 "OPENAI_API_KEY environment variable is not set. "
+                "Required for FAISS embedding generation."
+            )
+        _openai_client = OpenAI(api_key=api_key)
+    return _openai_client
+
+
+def get_groq_client() -> Groq:
+    """Groq client — used for all LLM chat completions."""
+    global _groq_client
+    if _groq_client is None:
+        api_key = config.GROQ_API_KEY
+        if not api_key:
+            raise ValueError(
+                "GROQ_API_KEY environment variable is not set. "
                 "Please configure it in your .env file."
             )
-        _client = OpenAI(api_key=api_key)
-    return _client
+        _groq_client = Groq(api_key=api_key)
+    return _groq_client
 
 def create_day_chunk(day_data: Dict[str, Any]) -> str:
     """
@@ -261,47 +272,58 @@ def retrieve_relevant_days(
 ) -> List[Dict[str, Any]]:
     """
     Search the FAISS index for the top_k most similar curriculum days.
-    
+
     Parameters:
       - query: Semantic text query
       - top_k: Maximum number of records to return
       - preferred_days: Optional filter list of day numbers
-      
+
     Returns:
       A list of day metadata dictionaries with a "similarity" float score.
+      Returns an empty list (graceful degradation) if the embedding API is
+      unavailable — callers must handle this case.
     """
     ensure_index_loaded()
-    
-    # Generate query embedding
-    client = get_openai_client()
-    response = client.embeddings.create(
-        input=[query],
-        model=config.EMBEDDING_MODEL
-    )
+
+    # Generate query embedding via OpenAI
+    try:
+        client = get_openai_client()
+        response = client.embeddings.create(
+            input=[query],
+            model=config.EMBEDDING_MODEL
+        )
+    except Exception as exc:
+        logger.warning(
+            "Embedding API unavailable (%s). Skipping semantic retrieval — "
+            "falling back to title/tier-based day selection.",
+            exc,
+        )
+        return []
+
     query_emb = response.data[0].embedding
     query_emb_np = np.array([query_emb], dtype=np.float32)
     faiss.normalize_L2(query_emb_np)
-    
+
     # Search the full index
     total_days = len(_metadata)
     scores, indices = _index.search(query_emb_np, total_days)
-    
+
     results = []
     for score, idx in zip(scores[0], indices[0]):
         if idx < 0 or idx >= len(_metadata):
             continue
         day_meta = _metadata[idx].copy()
         day_meta["similarity"] = float(score)
-        
+
         # Apply preferred_days hard filter if provided
         if preferred_days is not None:
             if day_meta["day"] not in preferred_days:
                 continue
-                
+
         results.append(day_meta)
         if len(results) == top_k:
             break
-            
+
     return results
 
 def get_all_days_metadata() -> List[Dict[str, Any]]:

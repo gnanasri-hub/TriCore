@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.schemas import InterviewRequest, InterviewResponse
 from app.services import data_manager, dialogue_manager
+from app import session_store
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +121,23 @@ def interview_endpoint(req: InterviewRequest):
     except Exception as exc:
         logger.exception("Error processing message for session '%s'", session_id)
         raise HTTPException(status_code=500, detail=f"Failed to process message: {exc}")
+
+
+# ── GET /api/interview/status ─────────────────────────────────────────────────
+
+@app.get("/api/interview/status")
+def session_status(sessionId: str):
+    """
+    Return session counters for testing/debugging.
+    Used by test scripts to read question_count and covered_days
+    without needing direct access to the in-process session store.
+    """
+    raw = session_store.get_session(sessionId.strip())
+    if raw is None:
+        raise HTTPException(status_code=404, detail=f"Session '{sessionId}' not found.")
+    return {
+        "sessionId":     sessionId,
+        "question_count": raw.get("question_count", 0),
+        "covered_days":   sorted(set(raw.get("covered_days", []))),
+        "interview_stage": raw.get("interview_stage", "UNKNOWN"),
+    }
