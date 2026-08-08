@@ -230,9 +230,15 @@ Tone guidelines:
 
 def generate_question(session: SessionState) -> str:
     """
-    Generate a natural, on-topic interview question calibrated to the candidate's
-    known strength on this curriculum day. FAISS retrieval provides the day's
-    learning objectives and tools as grounding context.
+    Generate a natural, on-topic interview question fully personalised to
+    the candidate's cohort history, role, and performance on this specific
+    curriculum day.
+
+    Personalization rules:
+      - is_strong  (day passed in ≤ 2 attempts) → design/architectural/trade-off question
+      - is_weak    (day skipped or failed)       → foundational/explanation question,
+                                                   encouraging tone
+      - is_medium  (passed in 3+ attempts)       → mid-level conceptual + implementation
     """
     day_num = session.current_day
     if not day_num:
@@ -242,14 +248,27 @@ def generate_question(session: SessionState) -> str:
             "of your background and what drew you to AI engineering?"
         )
 
-    profile = session.candidate_profile
-    day_meta = data_manager.get_day_metadata(day_num)
-    day_title = day_meta.get("title", f"Day {day_num}") if day_meta else f"Day {day_num}"
-    is_strong = day_title in profile.get("strong_topics", [])
-    is_weak   = (
+    profile      = session.candidate_profile
+    day_meta     = data_manager.get_day_metadata(day_num)
+    day_title    = day_meta.get("title", f"Day {day_num}") if day_meta else f"Day {day_num}"
+
+    # ── Classify this topic using day NUMBER (not title string) ──────────────
+    strong_days  = set(profile.get("completed_days", [])) - set(
+        profile.get("skipped_days", []) + profile.get("failed_days", [])
+    )
+    attempts_by_day = profile.get("attempts_by_day", {})
+    # Strong = completed AND <= 2 attempts
+    is_strong = (
+        day_num in strong_days
+        and attempts_by_day.get(day_num, 99) <= 2
+    )
+    is_weak = (
         day_num in profile.get("skipped_days", [])
         or day_num in profile.get("failed_days", [])
     )
+    attempts = attempts_by_day.get(day_num, 0)
+    was_skipped = day_num in profile.get("skipped_days", [])
+    was_failed  = day_num in profile.get("failed_days", [])
 
     # Retrieve the day's curriculum content via FAISS for grounding
     try:
@@ -264,26 +283,57 @@ def generate_question(session: SessionState) -> str:
     objectives_str = ", ".join(day_content.get("objectives", [])) or "not specified"
     tools_str      = ", ".join(day_content.get("tools", []))      or "not specified"
 
-    # Calibrate depth based on the candidate's history with this topic
+    # ── Build rich depth instruction from real candidate data ────────────────
+    job_role = profile.get("job_role", "Software Engineer")
+
     if is_strong:
         depth_instruction = (
-            "This is a strong area for the candidate — they passed it on the first attempt. "
-            "Ask a design-level or architectural question that probes trade-offs, edge cases, "
-            "or production considerations. Assume solid foundational knowledge and push beyond it."
+            f"DEPTH: ADVANCED — This candidate passed this topic in {attempts} attempt(s), "
+            f"demonstrating strong mastery. As a {job_role}, they should handle production-level "
+            f"complexity. Ask a design, architecture, or trade-off question that assumes solid "
+            f"fundamentals and probes edge cases, scaling concerns, or real-world failure modes. "
+            f"Do NOT ask what something is — they know. Ask how they'd design, debug, or choose."
         )
-    elif is_weak:
+    elif was_skipped:
         depth_instruction = (
-            "The candidate skipped or failed this topic in the cohort. "
-            "Ask a foundational question that gives them a genuine chance to demonstrate "
-            "whatever understanding they have. Be encouraging in tone — this is an opportunity "
-            "to redeem the topic, not a gotcha."
+            f"DEPTH: FOUNDATIONAL — This candidate skipped this topic entirely in the cohort. "
+            f"As a {job_role}, this may be an area they haven't worked with yet. "
+            f"Ask a clear, foundational question — what is it, why does it matter, how does it "
+            f"work at a basic level. Use an encouraging tone: this is their chance to show what "
+            f"they do know, not a test designed to expose a gap."
+        )
+    elif was_failed:
+        depth_instruction = (
+            f"DEPTH: FOUNDATIONAL — This candidate attempted this topic {attempts} time(s) "
+            f"in the cohort and did not pass. As a {job_role}, they may have struggled here. "
+            f"Ask a foundational explanation question — give them a genuine chance to demonstrate "
+            f"their current understanding. Encouraging tone. Focus on core concepts, not edge cases."
         )
     else:
+        # Completed but took 3+ attempts — medium depth
         depth_instruction = (
-            "The candidate completed this topic but needed multiple attempts. "
-            "Ask a solid mid-level question — conceptual understanding plus one concrete "
-            "application or implementation detail."
+            f"DEPTH: INTERMEDIATE — This candidate eventually passed this topic after "
+            f"{attempts} attempt(s). They understand the basics but may have gaps in depth. "
+            f"Ask a solid mid-level question: conceptual understanding plus one concrete "
+            f"application or implementation detail relevant to their role as a {job_role}."
         )
+
+    # ── Build candidate context summary for the LLM ──────────────────────────
+    strong_topics  = profile.get("strong_topics", [])
+    weak_topics    = profile.get("weak_topics", [])
+    skipped_days   = profile.get("skipped_days", [])
+    failed_days    = profile.get("failed_days", [])
+    signals        = profile.get("signals", {})
+
+    candidate_context = (
+        f"Strong areas (passed 1st or 2nd try): {', '.join(strong_topics) if strong_topics else 'none'}\n"
+        f"  Weak/struggled areas: {', '.join(weak_topics) if weak_topics else 'none'}\n"
+        f"  Skipped cohort days: {skipped_days if skipped_days else 'none'}\n"
+        f"  Failed cohort days:  {failed_days if failed_days else 'none'}\n"
+        f"  Commit streak: {signals.get('commitDays', '?')} days | "
+        f"Missions completed: {signals.get('missionsCompleted', '?')} | "
+        f"First-try passes: {signals.get('missionsFirstTry', '?')}"
+    )
 
     # Build recent history string (last 4 turns) for context continuity
     recent = session.history[-4:] if len(session.history) > 4 else session.history
@@ -297,19 +347,20 @@ Candidate profile:
   Name:             {profile.get('name', 'the candidate')}
   Role:             {profile.get('job_role', 'Software Engineer')}
   Experience:       {profile.get('years_experience', '?')} years ({profile.get('experience_level', 'Mid-level')})
+  {candidate_context}
 
 Current topic (curriculum Day {day_num} — "{day_title}"):
   Learning objectives: {objectives_str}
   Key tools/concepts:  {tools_str}
 
-Depth calibration:
-  {depth_instruction}
+{depth_instruction}
 
 Recent conversation:
 {history_str}
 
-Generate exactly one interview question. Output the question text only — no labels, \
-no preamble, no quotation marks."""
+Generate exactly one interview question tailored to this specific candidate's background, \
+role, and performance history. The question must reflect the depth level above. \
+Output the question text only — no labels, no preamble, no quotation marks."""
 
     client = data_manager.get_groq_client()
     try:
@@ -346,7 +397,7 @@ def generate_follow_up(
     The follow-up stays on the same topic and feels like a continuation of the conversation,
     not a new question.
     """
-    client = data_manager.get_openai_client()
+    client = data_manager.get_groq_client()
 
     recent = history[-4:] if len(history) > 4 else history
     history_str = "\n".join(
@@ -381,7 +432,7 @@ Output only the follow-up question text."""
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=config.GROQ_MODEL,
             messages=[
                 {"role": "system", "content": _INTERVIEWER_SYSTEM},
                 {"role": "user",   "content": user_prompt},

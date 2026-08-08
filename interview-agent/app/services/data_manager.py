@@ -217,17 +217,20 @@ def get_candidate_profile(candidate: Dict[str, Any]) -> Dict[str, Any]:
     completed_days = []
     skipped_days = []
     failed_days = []
-    
+
     strong_topics = []
     weak_topics = []
-    
+    attempts_by_day: Dict[int, int] = {}   # day_num → attempts (0 if skipped/no attempts)
+
     for mission in missions:
         day_num = mission.get("day")
         title = mission.get("title") or day_to_title.get(day_num, f"Day {day_num}")
         passed = mission.get("passed")
         skipped = mission.get("skipped", False)
         attempts = mission.get("attempts", 0)
-        
+
+        attempts_by_day[day_num] = attempts
+
         if skipped:
             skipped_days.append(day_num)
             weak_topics.append(title)
@@ -262,6 +265,7 @@ def get_candidate_profile(candidate: Dict[str, Any]) -> Dict[str, Any]:
         "failed_days": sorted(failed_days),
         "strong_topics": strong_topics,
         "weak_topics": weak_topics,
+        "attempts_by_day": attempts_by_day,
         "signals": signals
     }
 
