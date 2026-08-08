@@ -7,229 +7,281 @@ from app.services import data_manager, evaluator, question_generator, feedback_g
 
 logger = logging.getLogger(__name__)
 
-def select_next_day(candidate_profile: Dict[str, Any], covered_days: List[int]) -> Optional[Dict[str, Any]]:
+# ── Ending criteria ────────────────────────────────────────────────────────────
+MIN_QUESTIONS = 8
+MIN_DAYS = 4
+
+# ── Session helpers ────────────────────────────────────────────────────────────
+
+def _load_state(session_id: str) -> Optional[SessionState]:
+    """Return a SessionState for the given session_id, or None if not found."""
+    raw = session_store.get_session(session_id)
+    if raw is None:
+        return None
+    return SessionState(**raw)
+
+
+def _save_state(session_id: str, state: SessionState) -> None:
+    session_store.create_or_update_session(session_id, state.model_dump())
+
+
+# ── Topic selection ────────────────────────────────────────────────────────────
+
+def _select_next_day(
+    candidate_profile: Dict[str, Any], covered_days: List[int]
+) -> Optional[Dict[str, Any]]:
     """
-    Select the next curriculum day topic based on candidate profile prioritization:
-      1. Probing skipped or failed days.
-      2. Job role relevance (via semantic search).
-      3. Deep questions on topics passed easily (strong topics).
-      4. General fallback.
+    Pick the next curriculum day using a four-tier priority:
+      1. Skipped or failed days not yet covered.
+      2. Job-role-relevant days via FAISS semantic search.
+      3. Strong-topic days (completed in ≤ 2 attempts) not yet covered.
+      4. Any remaining uncovered day.
     """
     all_days = data_manager.get_all_days_metadata()
     if not all_days:
         logger.warning("No curriculum days metadata available.")
         return None
-        
+
     covered_set = set(covered_days)
-    
-    # 1. Probing: skipped/failed days
-    weak_day_nums = set(candidate_profile.get("skipped_days", []) + candidate_profile.get("failed_days", []))
-    available_weak = [d for d in all_days if d["day"] in weak_day_nums and d["day"] not in covered_set]
+
+    # 1. Probe weak/skipped days first
+    weak_nums = set(
+        candidate_profile.get("skipped_days", [])
+        + candidate_profile.get("failed_days", [])
+    )
+    available_weak = [d for d in all_days if d["day"] in weak_nums and d["day"] not in covered_set]
     if available_weak:
         return available_weak[0]
-        
-    # 2. Job Role Relevance: semantic match to candidate's job role
+
+    # 2. Job-role semantic match
     job_role = candidate_profile.get("job_role", "")
     if job_role:
-        relevant_days = data_manager.retrieve_relevant_days(job_role, top_k=10)
-        available_relevant = [d for d in relevant_days if d["day"] not in covered_set]
+        relevant = data_manager.retrieve_relevant_days(job_role, top_k=10)
+        available_relevant = [d for d in relevant if d["day"] not in covered_set]
         if available_relevant:
             day_num = available_relevant[0]["day"]
             return data_manager.get_day_metadata(day_num)
-            
-    # 3. Deep probing: topics passed easily (strong topics)
-    # Strong topics are completed days that are not failed or skipped
+
+    # 3. Strong topics
     completed_set = set(candidate_profile.get("completed_days", []))
-    strong_day_nums = completed_set - weak_day_nums
-    available_strong = [d for d in all_days if d["day"] in strong_day_nums and d["day"] not in covered_set]
+    strong_nums = completed_set - weak_nums
+    available_strong = [d for d in all_days if d["day"] in strong_nums and d["day"] not in covered_set]
     if available_strong:
         return available_strong[0]
-        
-    # 4. General fallback: any remaining uncovered days
+
+    # 4. Fallback: any uncovered day
     available_fallback = [d for d in all_days if d["day"] not in covered_set]
     if available_fallback:
         return available_fallback[0]
-        
+
     return None
+
+
+# ── Interview lifecycle ────────────────────────────────────────────────────────
 
 def start_interview(session_id: str, candidate_data: Dict[str, Any]) -> str:
     """
-    Initialize SessionState, profile candidate, select first topic,
-    generate welcome + initial question using generate_question(session),
-    and save state.
+    Initialise a new session: profile the candidate, select the first topic,
+    generate the welcome + opening question, persist state and return the reply.
+
+    Raises ValueError if called on a session that already exists.
     """
-    # 1. Profile candidate using the Data Manager
+    if session_store.get_session(session_id) is not None:
+        raise ValueError(f"Session '{session_id}' already exists.")
+
+    # 1. Build structured profile
     profile = data_manager.get_candidate_profile(candidate_data)
-    
-    # 2. Select the first curriculum day
-    covered_days = []
-    first_day_meta = select_next_day(profile, covered_days)
+
+    # 2. Select first curriculum day
+    first_day_meta = _select_next_day(profile, [])
     if not first_day_meta:
-        raise ValueError("Could not select a curriculum day to begin the interview.")
-        
+        raise ValueError("No curriculum day available to start the interview.")
+
     day_num = first_day_meta["day"]
-    covered_days.append(day_num)
-    
-    # 3. Initialize Pydantic SessionState object (without history first)
-    session_state = SessionState(
+
+    # 3. Initialise SessionState
+    state = SessionState(
         session_id=session_id,
         candidate_profile=profile,
         history=[],
         qa_records=[],
-        covered_days=covered_days,
+        covered_days=[day_num],
         current_day=day_num,
-        question_count=1,
+        question_count=0,           # incremented by generate_question below
         pending_follow_up={
             "is_pending": False,
             "follow_up_question": "",
             "original_question": "",
-            "vague_answer": ""
+            "vague_answer": "",
         },
-        interview_stage="INTERVIEWING"
+        interview_stage="INTERVIEWING",
     )
-    
-    # 4. Generate first question using the new signature
-    welcome_question = question_generator.generate_question(session_state)
-    session_state.history.append({"role": "assistant", "content": welcome_question})
-    
-    # 5. Save State
-    session_store.create_or_update_session(session_id, session_state.model_dump())
-    return welcome_question
 
-def should_end(session: SessionState) -> bool:
+    # 4. Generate opening question (includes welcome preamble from GPT)
+    opening = question_generator.generate_question(state)
+    state.history.append({"role": "assistant", "content": opening})
+    state.question_count += 1
+
+    # 5. Persist and return
+    _save_state(session_id, state)
+    return opening
+
+
+def should_end(state: SessionState) -> bool:
     """
-    Enforce ending rules:
-      - At least 8 questions asked.
-      - Covered at least 4 distinct curriculum days.
+    End the interview once both minimum thresholds are met:
+      - At least MIN_QUESTIONS questions have been asked.
+      - At least MIN_DAYS distinct curriculum days have been covered.
     """
-    return session.question_count >= 8 and len(session.covered_days) >= 4
+    return state.question_count >= MIN_QUESTIONS and len(state.covered_days) >= MIN_DAYS
+
+
+def _build_qa_record(
+    day_num: int,
+    day_meta: Optional[Dict[str, Any]],
+    question: str,
+    answer: str,
+    eval_result: evaluator.Evaluation,
+) -> Dict[str, Any]:
+    """
+    Build a flat Q&A record compatible with feedback_generator's expectations.
+    Stores both the raw evaluation scores and the derived fields.
+    """
+    return {
+        "day": day_num,
+        "day_title": day_meta.get("title", "") if day_meta else "",
+        "question": question,
+        "answer": answer,
+        # Derived flags
+        "is_vague": eval_result.is_vague,
+        "is_correct": eval_result.is_correct,          # @property on Evaluation
+        "evaluation_notes": eval_result.evaluation_notes,  # @property → overall_comment
+        # Raw scores — consumed by feedback_generator for richer summaries
+        "technical_accuracy": eval_result.technical_accuracy,
+        "depth": eval_result.depth,
+        "strengths": eval_result.strengths,
+        "missing_points": eval_result.missing_points,
+    }
+
 
 def process_message(session_id: str, message: str) -> InterviewResponse:
     """
-    Process candidate message using Pydantic SessionState structures.
+    Handle one conversation turn:
+      1. Load session state — 404 if missing.
+      2. Evaluate the candidate's answer against the last question.
+      3. Decide: follow-up | new_question | end.
+         - follow_up  → generate & return follow-up question (done=false).
+         - end        → generate feedback, return done=true + feedback object.
+         - new_question → select next day, generate question, return done=false.
     """
-    state_dict = session_store.get_session(session_id)
-    if not state_dict:
-        logger.warning(f"Session {session_id} not initialized. Starting default interview.")
-        default_candidate = {
-            "member": {"id": "CAND-DEFAULT", "name": "Candidate", "jobRole": "AI Engineer", "yearsExperience": 2},
-            "missions": [],
-            "signals": {}
-        }
-        reply = start_interview(session_id, default_candidate)
-        return InterviewResponse(reply=reply, done=False)
-        
-    # Load into Pydantic model
-    state = SessionState(**state_dict)
-    
+    state = _load_state(session_id)
+    if state is None:
+        raise KeyError(f"Session '{session_id}' not found.")
+
+    if state.interview_stage == "COMPLETED":
+        raise ValueError(f"Session '{session_id}' is already completed.")
+
     profile = state.candidate_profile
     current_day = state.current_day
-    current_day_meta = data_manager.get_day_metadata(current_day)
-    
-    # Determine the last question asked
-    pending_follow_up = state.pending_follow_up
-    if pending_follow_up.get("is_pending"):
-        last_question = pending_follow_up["follow_up_question"]
+    current_day_meta = data_manager.get_day_metadata(current_day) if current_day else None
+
+    # ── Determine the question that prompted this answer ──────────────────────
+    pending = state.pending_follow_up
+    if pending.get("is_pending"):
+        last_question = pending["follow_up_question"]
     else:
-        last_question = ""
-        for msg in reversed(state.history):
-            if msg["role"] == "assistant":
-                last_question = msg["content"]
-                break
-                
-    # 1. Evaluate candidate response
-    evaluation = evaluator.evaluate_answer(last_question, message, current_day_meta)
-    
-    # Append user response to history
+        last_question = next(
+            (m["content"] for m in reversed(state.history) if m["role"] == "assistant"),
+            "",
+        )
+
+    # ── 1. Evaluate the answer ────────────────────────────────────────────────
+    eval_result = evaluator.evaluate_answer(
+        question=last_question,
+        answer=message,
+        curriculum_context=current_day_meta or {},
+    )
+
+    # Append user turn to history
     state.history.append({"role": "user", "content": message})
-    
-    # 2. Trigger follow-up if response is vague and we aren't in a follow-up
-    if evaluation.is_vague and not pending_follow_up.get("is_pending"):
-        logger.info(f"Vague response detected on Day {current_day}. Generating follow-up.")
-        
-        follow_up_text = question_generator.generate_follow_up(last_question, message, state.history)
-        
+
+    # ── 2. Decide next action ────────────────────────────────────────────────
+    action = evaluator.decide_next_action(eval_result, state)
+
+    # ── 3a. Follow-up branch ──────────────────────────────────────────────────
+    if action == "follow_up":
+        logger.info("Generating follow-up for session %s (day %s).", session_id, current_day)
+        follow_up_text = question_generator.generate_follow_up(
+            last_question, message, state.history
+        )
         state.pending_follow_up = {
             "is_pending": True,
             "follow_up_question": follow_up_text,
             "original_question": last_question,
-            "vague_answer": message
+            "vague_answer": message,
         }
-        
         state.history.append({"role": "assistant", "content": follow_up_text})
         state.question_count += 1
-        
-        session_store.create_or_update_session(session_id, state.model_dump())
+        _save_state(session_id, state)
         return InterviewResponse(reply=follow_up_text, done=False)
-        
-    # 3. Handle non-vague response or resolved follow-up response
-    # Register QA record
-    if pending_follow_up.get("is_pending"):
-        combined_answer = f"Initial (Vague): {pending_follow_up['vague_answer']} | Follow-up: {message}"
-        original_q = pending_follow_up["original_question"]
-        qa_rec = {
-            "day": current_day,
-            "day_title": current_day_meta.get("title", ""),
-            "question": original_q,
-            "answer": combined_answer,
-            "is_vague": evaluation.is_vague,
-            "is_correct": evaluation.is_correct,
-            "evaluation_notes": evaluation.evaluation_notes
-        }
+
+    # ── Commit QA record (for both new_question and end paths) ───────────────
+    if pending.get("is_pending"):
+        # Combine the vague initial answer with the follow-up answer
+        combined_answer = (
+            f"Initial: {pending['vague_answer']} | Follow-up: {message}"
+        )
+        qa_rec = _build_qa_record(
+            current_day, current_day_meta,
+            pending["original_question"], combined_answer, eval_result,
+        )
         state.pending_follow_up = {
             "is_pending": False,
             "follow_up_question": "",
             "original_question": "",
-            "vague_answer": ""
+            "vague_answer": "",
         }
     else:
-        qa_rec = {
-            "day": current_day,
-            "day_title": current_day_meta.get("title", ""),
-            "question": last_question,
-            "answer": message,
-            "is_vague": False,
-            "is_correct": evaluation.is_correct,
-            "evaluation_notes": evaluation.evaluation_notes
-        }
-        
+        qa_rec = _build_qa_record(
+            current_day, current_day_meta,
+            last_question, message, eval_result,
+        )
+
     state.qa_records.append(qa_rec)
-    
-    # 4. Check if interview should end
-    if should_end(state):
-        logger.info(f"Ending interview for session {session_id}. Generating final feedback.")
-        feedback = feedback_generator.generate_feedback(profile, state.qa_records)
+
+    # ── 3b. End interview ─────────────────────────────────────────────────────
+    if action == "end" or should_end(state):
+        logger.info("Ending interview for session %s.", session_id)
+        fb = feedback_generator.generate_feedback(profile, state.qa_records)
         state.interview_stage = "COMPLETED"
-        session_store.create_or_update_session(session_id, state.model_dump())
-        
+        _save_state(session_id, state)
         return InterviewResponse(
-            reply="Thank you! We have completed the interview and evaluated your responses.",
+            reply="Thank you — that wraps up our interview. I'll share your feedback below.",
             done=True,
-            feedback=feedback
+            feedback=Feedback(**fb),
         )
-        
-    # 5. Transition to next topic
-    next_day_meta = select_next_day(profile, state.covered_days)
-    if not next_day_meta:
-        logger.warning("No more curriculum days available. Ending early.")
-        feedback = feedback_generator.generate_feedback(profile, state.qa_records)
+
+    # ── 3c. Next question ─────────────────────────────────────────────────────
+    next_day_meta = _select_next_day(profile, state.covered_days)
+    if next_day_meta is None:
+        # Ran out of curriculum days — wrap up gracefully
+        logger.info("No more curriculum days. Ending session %s early.", session_id)
+        fb = feedback_generator.generate_feedback(profile, state.qa_records)
         state.interview_stage = "COMPLETED"
-        session_store.create_or_update_session(session_id, state.model_dump())
+        _save_state(session_id, state)
         return InterviewResponse(
-            reply="Thank you! The interview is complete.",
+            reply="We've covered everything on our agenda. Let me share your feedback.",
             done=True,
-            feedback=feedback
+            feedback=Feedback(**fb),
         )
-        
+
     next_day_num = next_day_meta["day"]
     state.covered_days.append(next_day_num)
     state.current_day = next_day_num
-    
-    # Generate new topic question using new generate_question signature
+
     next_question = question_generator.generate_question(state)
     state.history.append({"role": "assistant", "content": next_question})
     state.question_count += 1
-    
-    # Save State
-    session_store.create_or_update_session(session_id, state.model_dump())
+
+    _save_state(session_id, state)
     return InterviewResponse(reply=next_question, done=False)
