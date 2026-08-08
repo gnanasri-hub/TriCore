@@ -248,19 +248,22 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
     # ── 2. Decide ─────────────────────────────────────────────────────────────
     action = evaluator.decide_next_action(eval_result, state)
 
-    # ── 3a. Follow-up ─────────────────────────────────────────────────────────
-    if action == "follow_up":
+    # ── 3a. Follow-up (clarify or escalate) ───────────────────────────────────
+    if action in ("follow_up_clarify", "follow_up_escalate"):
+        mode = "escalate" if action == "follow_up_escalate" else "clarify"
         logger.info(
-            "Session %s: follow-up triggered on day %s (vague=%s incomplete=%s strong=%s depth=%d)",
-            session_id, current_day,
+            "Session %s: follow-up [%s] triggered on day %s "
+            "(vague=%s incomplete=%s strong=%s depth=%d)",
+            session_id, mode, current_day,
             eval_result.is_vague, eval_result.is_incomplete,
             eval_result.is_strong, eval_result.depth,
         )
         follow_up_text = question_generator.generate_follow_up(
-            last_question, message, state.history
+            last_question, message, state.history, mode=mode
         )
         state.pending_follow_up = {
             "is_pending": True,
+            "follow_up_type": mode,          # "clarify" | "escalate"
             "follow_up_question": follow_up_text,
             "original_question": last_question,
             "vague_answer": message,

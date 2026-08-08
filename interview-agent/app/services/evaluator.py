@@ -129,58 +129,85 @@ Use exactly this structure:
 
 def decide_next_action(
     evaluation: Evaluation, session: Any
-) -> Literal["follow_up", "new_question", "end"]:
+) -> Literal["follow_up_clarify", "follow_up_escalate", "new_question", "end"]:
     """
     Decide what to do after evaluating an answer.
 
-    Priority order:
-      1. Already on a follow-up  → new_question  (hard cap: never chain follow-ups)
-      2. Vague OR incomplete     → follow_up     (always probe once)
-      3. Strong + depth >= 8     → new_question  (candidate earned the move)
-      4. Strong + depth < 8      → follow_up     (push for more depth)
-      5. Default                 → new_question
+    Return values
+    ─────────────
+    follow_up_clarify   Vague, too short, or missing key concepts
+                        → probe for concrete detail / elaboration
+    follow_up_escalate  Strong answer, depth < 8
+                        → push harder on the same topic (harder variant)
+    new_question        Strong + depth >= 8, OR already on a follow-up (hard cap)
+                        → move to the next curriculum day
+    end                 (reserved for future use — not returned by this function)
+
+    Hard cap: never chain follow-ups. If pending_follow_up.is_pending is True
+    the answer is always new_question regardless of quality.
     """
     if isinstance(session, dict):
         pending = session.get("pending_follow_up", {})
     else:
         pending = getattr(session, "pending_follow_up", {})
 
+    # Hard cap — already asked one follow-up, must move on
     if pending.get("is_pending", False):
         return "new_question"
 
+    # Vague, too short, or incomplete → ask for clarification/elaboration
     if evaluation.is_vague or evaluation.is_incomplete:
-        return "follow_up"
+        return "follow_up_clarify"
 
+    # Strong answer — escalate if depth is shallow, else reward with next topic
     if evaluation.is_strong:
-        return "new_question" if evaluation.depth >= 8 else "follow_up"
+        return "new_question" if evaluation.depth >= 8 else "follow_up_escalate"
 
+    # Average answer (not strong, not vague) → move on
     return "new_question"
 
 
-def generate_follow_up(evaluation: Evaluation, question: str, answer: str) -> str:
+def generate_follow_up(evaluation: Evaluation, question: str, answer: str,
+                       mode: str = "clarify") -> str:
     """
-    Generate a targeted follow-up question based on the evaluation.
+    Generate a targeted follow-up question based on the evaluation and mode.
+
+    mode="clarify"   — answer was vague/incomplete: probe for concrete detail
+    mode="escalate"  — answer was strong but shallow: push to harder territory
+
     (Retained for completeness — question_generator.generate_follow_up is
     the one used by the dialogue manager in production.)
     """
-    missing = ", ".join(evaluation.missing_points) if evaluation.missing_points else "none identified"
-    strengths = ", ".join(evaluation.strengths) if evaluation.strengths else "none identified"
+    missing   = ", ".join(evaluation.missing_points) if evaluation.missing_points else "none identified"
+    strengths = ", ".join(evaluation.strengths)       if evaluation.strengths       else "none identified"
+
+    if mode == "escalate":
+        follow_up_instruction = (
+            "The candidate gave a solid answer. Now escalate: ask a harder question "
+            "on the same topic — a production edge case, a trade-off they haven't addressed, "
+            "or a deeper architectural decision. DO NOT ask them to repeat or elaborate on "
+            "what they already said well. Push them to the next level."
+        )
+    else:
+        follow_up_instruction = (
+            "The candidate's answer was vague or incomplete. Ask them to be more concrete: "
+            "request a specific example, name a tool they'd actually use, or walk through "
+            "one implementation step in detail. Keep the tone encouraging, not interrogative."
+        )
 
     system_prompt = """\
-You are a senior technical interviewer. The candidate's last answer warrants a follow-up. \
-Your follow-up should feel like a natural continuation of the conversation — warm, precise, \
-and intellectually curious. Output only the follow-up question text, no preamble."""
+You are a senior technical interviewer. Generate one follow-up question (1-2 sentences). \
+Output only the question text — no preamble, no labels."""
 
     user_prompt = (
         f"Original question: {question}\n"
         f"Candidate's answer: {answer}\n\n"
-        f"Evaluation summary:\n"
-        f"  - Vague: {evaluation.is_vague}\n"
-        f"  - Incomplete: {evaluation.is_incomplete}\n"
-        f"  - Strong: {evaluation.is_strong}\n"
-        f"  - Strengths in the answer: {strengths}\n"
-        f"  - What was missing: {missing}\n\n"
-        "Write one follow-up question (1-2 sentences). Do not introduce a new topic."
+        f"Evaluation:\n"
+        f"  - Vague: {evaluation.is_vague} | Incomplete: {evaluation.is_incomplete} | Strong: {evaluation.is_strong}\n"
+        f"  - Depth: {evaluation.depth}/10 | Accuracy: {evaluation.technical_accuracy}/10\n"
+        f"  - Strengths: {strengths}\n"
+        f"  - Missing: {missing}\n\n"
+        f"Instruction: {follow_up_instruction}"
     )
 
     client = data_manager.get_groq_client()
@@ -197,6 +224,12 @@ and intellectually curious. Output only the follow-up question text, no preamble
         return response.choices[0].message.content.strip()
     except Exception as exc:
         logger.error("Follow-up generation failed: %s", exc)
+        if mode == "escalate":
+            return (
+                "That's a solid foundation — now let's push deeper. "
+                "Can you walk me through how that would hold up under production load, "
+                "or describe a trade-off you'd have to navigate at scale?"
+            )
         return (
             "That's a good start — could you give me a concrete example of how you'd "
             "apply that in practice, or walk me through a specific implementation detail?"

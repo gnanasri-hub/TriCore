@@ -136,8 +136,9 @@ def session_status(sessionId: str):
     if raw is None:
         raise HTTPException(status_code=404, detail=f"Session '{sessionId}' not found.")
     return {
-        "sessionId":     sessionId,
-        "question_count": raw.get("question_count", 0),
-        "covered_days":   sorted(set(raw.get("covered_days", []))),
+        "sessionId":      sessionId,
+        "question_count":  raw.get("question_count", 0),
+        "covered_days":    sorted(set(raw.get("covered_days", []))),
         "interview_stage": raw.get("interview_stage", "UNKNOWN"),
+        "pending_follow_up": raw.get("pending_follow_up", {}),
     }

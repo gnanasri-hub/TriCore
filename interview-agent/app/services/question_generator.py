@@ -391,11 +391,18 @@ def generate_follow_up(
     question: str,
     vague_answer: str,
     history: List[Dict[str, str]],
+    mode: str = "clarify",
 ) -> str:
     """
-    Generate a natural follow-up that probes the candidate's vague or brief response.
-    The follow-up stays on the same topic and feels like a continuation of the conversation,
-    not a new question.
+    Generate a natural follow-up question.
+
+    mode="clarify"   — answer was vague/incomplete: ask for concrete detail,
+                       a specific example, or a step-by-step walk-through.
+    mode="escalate"  — answer was strong but shallow: push to a harder variant
+                       of the same topic — a trade-off, edge case, or production
+                       concern they haven't addressed yet.
+
+    Hard rule: stay on the same topic. Never introduce a new curriculum day.
     """
     client = data_manager.get_groq_client()
 
@@ -404,10 +411,25 @@ def generate_follow_up(
         f"  {m['role'].upper()}: {m['content']}" for m in recent
     ) if recent else "  (No prior turns.)"
 
+    if mode == "escalate":
+        follow_up_instruction = """\
+The candidate gave a solid answer. Your job is to escalate difficulty on the SAME topic.
+- Acknowledge what they got right briefly (one clause at most), then immediately push deeper.
+- Ask about a production edge case, a scaling trade-off, a failure mode, or an architectural
+  decision embedded in what they said that they haven't addressed yet.
+- DO NOT ask them to repeat or elaborate on what they already explained well.
+- Sound intellectually curious and rigorous, not adversarial."""
+    else:
+        follow_up_instruction = """\
+The candidate's answer was vague, too short, or incomplete. Your job is to probe for depth.
+- Ask them to be concrete: a specific tool they'd use, a real example, or one step
+  of implementation they'd actually take.
+- Keep the tone encouraging and collaborative — "That's a start, could you walk me through..."
+  works better than a blunt "Explain X."
+- Stay anchored to exactly what they said. Do not switch topics."""
+
     user_prompt = f"""\
-The candidate just gave a response that needs probing. Your job is to ask one focused \
-follow-up question that draws out more depth — without switching topics or making them \
-feel judged.
+{follow_up_instruction}
 
 Original question you asked:
   {question}
@@ -415,20 +437,10 @@ Original question you asked:
 Candidate's response:
   {vague_answer}
 
-Recent conversation context:
+Recent conversation:
 {history_str}
 
-Follow-up guidelines:
-- If the answer was vague or too brief: ask them to make it concrete — a specific example, \
-  a tool they'd use, or a step they'd actually take.
-- If the answer touched the surface but missed depth: ask about the 'why' or a trade-off \
-  embedded in what they said.
-- Keep it to one sentence or two at most.
-- Sound curious and collaborative, not interrogative. \
-  "That's interesting — could you say more about..." works better than "Explain X."
-- Do NOT introduce a new topic. Stay anchored to their answer.
-
-Output only the follow-up question text."""
+Output only the follow-up question text — no labels, no preamble."""
 
     try:
         response = client.chat.completions.create(
@@ -443,6 +455,12 @@ Output only the follow-up question text."""
         return response.choices[0].message.content.strip()
     except Exception as exc:
         logger.error("Follow-up generation failed: %s", exc)
+        if mode == "escalate":
+            return (
+                "That's a solid foundation — now let's push deeper. "
+                "Can you walk me through how that would hold up under production load, "
+                "or describe a trade-off you'd have to navigate at scale?"
+            )
         return (
             "That's a good start — could you give me a concrete example of how you'd "
             "apply that in practice, or walk me through a specific implementation detail?"
