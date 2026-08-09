@@ -421,12 +421,13 @@ The candidate gave a solid answer. Your job is to escalate difficulty on the SAM
 - Sound intellectually curious and rigorous, not adversarial."""
     else:
         follow_up_instruction = """\
-The candidate's answer was vague, too short, or incomplete. Your job is to probe for depth.
-- Ask them to be concrete: a specific tool they'd use, a real example, or one step
-  of implementation they'd actually take.
-- Keep the tone encouraging and collaborative — "That's a start, could you walk me through..."
-  works better than a blunt "Explain X."
-- Stay anchored to exactly what they said. Do not switch topics."""
+The candidate's answer was vague, too short, incomplete, or they indicated they don't know the answer (e.g. "idk", "no idea", "i dont know").
+Your job is to:
+- If they said they don't know, or if the answer is very short (< 5-8 words), start your response with EXACTLY: "That's okay — let's break it down."
+- Provide a brief, simplified hint or explanation of the core concept.
+- Ask a guided, simpler follow-up question.
+- If they still struggle, simplify the concept further to reduce the difficulty.
+- Keep the tone encouraging, warm, and collaborative. Do not switch topics."""
 
     user_prompt = f"""\
 {follow_up_instruction}
