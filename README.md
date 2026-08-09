@@ -23,7 +23,7 @@ An AI-powered adaptive interview system that:
 - AI: LLM-based evaluation engine
 
 ## 🎥 Live Demo
-[PUT YOUR LINK HERE]
+https://tricore-agent-wdjt.onrender.com/
 
 ## 🛠️ Run Locally
 
