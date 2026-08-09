@@ -192,42 +192,61 @@ def _load_curriculum_cache() -> Dict[str, Any]:
 
 def get_candidate_profile(candidate: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Parse a candidate's record and return a structured profile dictionary.
-    
-    The structured dictionary contains:
-      - id: str
-      - name: str
-      - job_role: str
-      - experience_level: str ("Junior", "Mid-level", "Senior")
-      - years_experience: int
-      - completed_days: List[int]
-      - skipped_days: List[int]
-      - failed_days: List[int]
-      - strong_topics: List[str]
-      - weak_topics: List[str]
-      - signals: Dict[str, Any]
+    Parse a candidate record and return a structured profile dictionary.
+
+    Accepts two input shapes:
+
+    1. Flat (from CandidatePayload.model_dump — new canonical format):
+       { "id": "CAND-001", "name": "Sarah", "role": "Data Engineer",
+         "yearsExperience": 9, "missions": [...], "signals": {...} }
+
+    2. Wrapped (legacy candidates.json format):
+       { "member": { "id": "CAND-001", "name": "Sarah",
+                     "jobRole": "Data Engineer", "yearsExperience": 9 },
+         "missions": [...], "signals": {...} }
+
+    Returns a normalised profile dict used by dialogue_manager and
+    question_generator.
     """
-    member = candidate.get("member", {})
-    missions = candidate.get("missions", [])
-    signals = candidate.get("signals", {})
+    # ── Normalise: unwrap legacy "member" envelope if present ────────────────
+    if "member" in candidate:
+        member = candidate.get("member", {}) or {}
+        # Build a flat working dict from member fields + top-level fields
+        flat: Dict[str, Any] = {**member, **{k: v for k, v in candidate.items() if k != "member"}}
+    else:
+        flat = candidate
+
+    # ── Extract top-level fields (handle both naming conventions) ────────────
+    cand_id  = flat.get("id")
+    name     = flat.get("name")
+    # "role" (from model_dump by_alias=False) or legacy "jobRole"
+    job_role = flat.get("role") or flat.get("jobRole") or flat.get("job_role")
+    years_exp = int(flat.get("yearsExperience", 0) or 0)
+    missions  = flat.get("missions", [])
+    signals   = flat.get("signals", {})
     
     cache = _load_curriculum_cache()
     day_to_title = cache.get("day_to_title", {})
-    
-    completed_days = []
-    skipped_days = []
-    failed_days = []
 
-    strong_topics = []
-    weak_topics = []
-    attempts_by_day: Dict[int, int] = {}   # day_num → attempts (0 if skipped/no attempts)
+    completed_days: List[int] = []
+    skipped_days:   List[int] = []
+    failed_days:    List[int] = []
+    strong_topics:  List[str] = []
+    weak_topics:    List[str] = []
+    attempts_by_day: Dict[int, int] = {}
 
     for mission in missions:
-        day_num = mission.get("day")
-        title = mission.get("title") or day_to_title.get(day_num, f"Day {day_num}")
-        passed = mission.get("passed")
-        skipped = mission.get("skipped", False)
-        attempts = mission.get("attempts", 0)
+        # missions may be MissionRecord objects (Pydantic) or plain dicts
+        if hasattr(mission, "model_dump"):
+            m = mission.model_dump()
+        else:
+            m = dict(mission)
+
+        day_num  = m.get("day")
+        title    = m.get("title") or day_to_title.get(day_num, f"Day {day_num}")
+        passed   = m.get("passed")
+        skipped  = m.get("skipped", False)
+        attempts = int(m.get("attempts") or 0)
 
         attempts_by_day[day_num] = attempts
 
@@ -236,7 +255,6 @@ def get_candidate_profile(candidate: Dict[str, Any]) -> Dict[str, Any]:
             weak_topics.append(title)
         elif passed is True:
             completed_days.append(day_num)
-            # Define "strong" as passed in <= 2 attempts
             if attempts <= 2:
                 strong_topics.append(title)
             else:
@@ -244,29 +262,28 @@ def get_candidate_profile(candidate: Dict[str, Any]) -> Dict[str, Any]:
         elif passed is False:
             failed_days.append(day_num)
             weak_topics.append(title)
-            
-    # Categorize experience level
-    years_exp = member.get("yearsExperience", 0)
+
+    # Experience level
     if years_exp < 3:
         exp_level = "Junior"
     elif years_exp <= 5:
         exp_level = "Mid-level"
     else:
         exp_level = "Senior"
-        
+
     return {
-        "id": member.get("id"),
-        "name": member.get("name"),
-        "job_role": member.get("jobRole"),
+        "id":              cand_id,
+        "name":            name,
+        "job_role":        job_role,
         "experience_level": exp_level,
         "years_experience": years_exp,
-        "completed_days": sorted(completed_days),
-        "skipped_days": sorted(skipped_days),
-        "failed_days": sorted(failed_days),
-        "strong_topics": strong_topics,
-        "weak_topics": weak_topics,
+        "completed_days":  sorted(completed_days),
+        "skipped_days":    sorted(skipped_days),
+        "failed_days":     sorted(failed_days),
+        "strong_topics":   strong_topics,
+        "weak_topics":     weak_topics,
         "attempts_by_day": attempts_by_day,
-        "signals": signals
+        "signals":         signals,
     }
 
 def retrieve_relevant_days(

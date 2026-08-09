@@ -1,7 +1,8 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.schemas import InterviewRequest, InterviewResponse
@@ -11,7 +12,7 @@ from app import session_store
 logger = logging.getLogger(__name__)
 
 
-# ── Startup: pre-load FAISS index so the first request isn't slow ─────────────
+# ── Startup ───────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -23,78 +24,104 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Interview Agent", lifespan=lifespan)
+app = FastAPI(
+    title="AI Interview Agent",
+    description="Personalised technical interview agent for the TriCore AI cohort.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
-# ── Global exception handlers ─────────────────────────────────────────────────
+# ── Global exception handler ──────────────────────────────────────────────────
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request, exc):
+async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled error on %s", request.url)
     return JSONResponse(status_code=500, content={"detail": "Internal server error."})
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    # Check if sessionId is completely missing from the request
+    is_session_id_missing = any(
+        err.get("loc") == ("body", "sessionId") and err.get("type") == "missing"
+        for err in errors
+    )
+    if is_session_id_missing:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": errors}
+        )
+
+    # Map other request validation errors to 400 Bad Request
+    error_messages = []
+    for err in errors:
+        msg = err.get("msg", "")
+        if msg.startswith("Value error, "):
+            msg = msg[len("Value error, "):]
+        
+        loc = err.get("loc", [])
+        if len(loc) > 1:
+            field_name = ".".join(str(l) for l in loc[1:])
+            error_messages.append(f"'{field_name}': {msg}")
+        else:
+            error_messages.append(msg)
+
+    detail_msg = "; ".join(error_messages) if error_messages else "Request validation failed."
+    return JSONResponse(
+        status_code=400,
+        content={"detail": detail_msg}
+    )
+
+
 # ── POST /api/interview ───────────────────────────────────────────────────────
 
-@app.post("/api/interview", response_model=InterviewResponse)
-def interview_endpoint(req: InterviewRequest):
+@app.post(
+    "/api/interview",
+    response_model=InterviewResponse,
+    summary="Drive the interview lifecycle",
+    responses={
+        400: {"description": "Bad request — missing or conflicting fields"},
+        404: {"description": "Session not found"},
+        409: {"description": "Session already exists"},
+        410: {"description": "Session already completed"},
+    },
+)
+def interview_endpoint(req: InterviewRequest) -> InterviewResponse:
     """
-    Single endpoint that drives the entire interview lifecycle.
+    Single endpoint for the entire interview lifecycle.
 
-    ┌─────────────────────────────────────────────────────────────────┐
-    │ START   { sessionId, candidate: {...} }                         │
-    │   → creates session, returns { reply, done: false }             │
-    ├─────────────────────────────────────────────────────────────────┤
-    │ TURN    { sessionId, message: "..." }                           │
-    │   → evaluates answer, returns { reply, done: false }            │
-    │     OR  { reply, done: true, feedback: {...} } when finished    │
-    └─────────────────────────────────────────────────────────────────┘
+    **START a new interview**
+    ```json
+    { "sessionId": "abc-123", "candidate": { "id": "...", "name": "...", "role": "..." } }
+    ```
+    Returns `{ "reply": "...", "done": false }`
 
-    Error responses
-    ───────────────
-    400  Missing or conflicting fields (both candidate+message, or neither)
-    404  sessionId not found when sending a message turn
-    409  Trying to start a session that already exists
-    410  Session is already completed
-    422  Pydantic validation failure (FastAPI built-in)
-    500  Unexpected server error
+    **Advance a turn**
+    ```json
+    { "sessionId": "abc-123", "message": "My answer here..." }
+    ```
+    Returns `{ "reply": "...", "done": false }` or the final
+    `{ "reply": "Interview completed.", "done": true, "feedback": {...} }`
+
+    Pydantic validates all fields before this function is called:
+    - `sessionId` must be non-empty
+    - Exactly one of `candidate` or `message` must be present
+    - `message` must be non-empty when provided
     """
+    session_id = req.sessionId  # already stripped by the validator
 
-    # ── Validate: sessionId must be a non-empty string ────────────────────────
-    if not req.sessionId or not req.sessionId.strip():
-        raise HTTPException(status_code=400, detail="'sessionId' must be a non-empty string.")
-
-    session_id = req.sessionId.strip()
-
-    has_candidate = req.candidate is not None
-    has_message   = req.message   is not None
-
-    # ── Validate: exactly one of candidate / message must be present ──────────
-    if has_candidate and has_message:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either 'candidate' (to start) or 'message' (for a turn), not both.",
-        )
-
-    if not has_candidate and not has_message:
-        raise HTTPException(
-            status_code=400,
-            detail="One of 'candidate' (to start an interview) or 'message' (for a turn) is required.",
-        )
-
-    # ── START: initialise a new session ──────────────────────────────────────
-    if has_candidate:
-        # Validate candidate payload has at least a 'member' key
-        if not isinstance(req.candidate, dict) or "member" not in req.candidate:
-            raise HTTPException(
-                status_code=400,
-                detail="'candidate' must be an object containing at least a 'member' field.",
-            )
+    # ── START ─────────────────────────────────────────────────────────────────
+    if req.candidate is not None:
+        # Pass the candidate as a plain dict so data_manager can process it.
+        # model_dump() produces the flat format; data_manager accepts both flat
+        # and legacy-wrapped formats.
+        candidate_dict = req.candidate.model_dump(by_alias=False)
 
         try:
-            reply = dialogue_manager.start_interview(session_id, req.candidate)
+            reply = dialogue_manager.start_interview(session_id, candidate_dict)
         except ValueError as exc:
-            # start_interview raises ValueError when session already exists
             raise HTTPException(status_code=409, detail=str(exc))
         except Exception as exc:
             logger.exception("Error starting interview for session '%s'", session_id)
@@ -102,21 +129,20 @@ def interview_endpoint(req: InterviewRequest):
 
         return InterviewResponse(reply=reply, done=False)
 
-    # ── TURN: process the candidate's answer ──────────────────────────────────
-    message = req.message.strip() if req.message else ""
-    if not message:
-        raise HTTPException(status_code=400, detail="'message' must not be empty.")
+    # ── TURN ──────────────────────────────────────────────────────────────────
+    message = req.message.strip()  # guaranteed non-empty by schema validator
 
     try:
         return dialogue_manager.process_message(session_id, message)
     except KeyError as exc:
-        # process_message raises KeyError when session_id is not in the store
         raise HTTPException(
             status_code=404,
-            detail=f"Session not found. Start the interview first by sending a 'candidate' payload. ({exc})",
+            detail=(
+                f"Session '{session_id}' not found. "
+                "Start the interview first by sending a 'candidate' payload."
+            ),
         )
     except ValueError as exc:
-        # process_message raises ValueError when session is already completed
         raise HTTPException(status_code=410, detail=str(exc))
     except Exception as exc:
         logger.exception("Error processing message for session '%s'", session_id)
@@ -125,20 +151,23 @@ def interview_endpoint(req: InterviewRequest):
 
 # ── GET /api/interview/status ─────────────────────────────────────────────────
 
-@app.get("/api/interview/status")
+@app.get(
+    "/api/interview/status",
+    summary="Session debug counters",
+    responses={404: {"description": "Session not found"}},
+)
 def session_status(sessionId: str):
     """
-    Return session counters for testing/debugging.
-    Used by test scripts to read question_count and covered_days
-    without needing direct access to the in-process session store.
+    Return live session counters for testing and debugging.
+    Not required by the spec — useful for test scripts.
     """
     raw = session_store.get_session(sessionId.strip())
     if raw is None:
         raise HTTPException(status_code=404, detail=f"Session '{sessionId}' not found.")
     return {
-        "sessionId":      sessionId,
-        "question_count":  raw.get("question_count", 0),
-        "covered_days":    sorted(set(raw.get("covered_days", []))),
-        "interview_stage": raw.get("interview_stage", "UNKNOWN"),
+        "sessionId":        sessionId,
+        "question_count":   raw.get("question_count", 0),
+        "covered_days":     sorted(set(raw.get("covered_days", []))),
+        "interview_stage":  raw.get("interview_stage", "UNKNOWN"),
         "pending_follow_up": raw.get("pending_follow_up", {}),
     }
