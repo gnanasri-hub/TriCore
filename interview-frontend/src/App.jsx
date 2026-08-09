@@ -7,7 +7,7 @@ import LiveFeedbackPanel from './LiveFeedbackPanel';
 import FeedbackScreen from './FeedbackScreen';
 import { Sparkles, Terminal, ArrowRight, Cpu, Zap, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
 
-axios.defaults.baseURL = "http://127.0.0.1:8000";
+axios.defaults.baseURL = "http://127.0.0.1:8001";
 
 const TOPICS = {
   7: "Embeddings",
