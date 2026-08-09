@@ -89,7 +89,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.post(
     "/api/interview",
-    response_model=InterviewResponse,
+    response_model=None,
     summary="Drive the interview lifecycle",
     responses={
         400: {"description": "Bad request — missing or conflicting fields"},
@@ -137,13 +137,25 @@ def interview_endpoint(req: InterviewRequest) -> InterviewResponse:
             logger.exception("Error starting interview for session '%s'", session_id)
             raise HTTPException(status_code=500, detail=f"Failed to start interview: {exc}")
 
-        return InterviewResponse(reply=reply, done=False)
+        return {"reply": reply, "done": False}
 
     # ── TURN ──────────────────────────────────────────────────────────────────
     message = req.message.strip()  # guaranteed non-empty by schema validator
 
     try:
         return dialogue_manager.process_message(session_id, message)
+
+        if result.get("done"):
+        return {
+            "reply": result["reply"],
+            "done": True,
+            "feedback": result["feedback"]
+        }
+    else:
+        return {
+            "reply": result["reply"],
+            "done": False
+        }
     except KeyError as exc:
         raise HTTPException(
             status_code=404,
