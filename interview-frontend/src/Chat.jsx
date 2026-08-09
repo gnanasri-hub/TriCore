@@ -1,15 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MessageBubble from './MessageBubble';
-import { Loader2, Sparkles, BookOpen, Layers } from 'lucide-react';
+import { Loader2, Sparkles, BookOpen, Layers, Keyboard } from 'lucide-react';
 
 const TOPICS = {
-  1: "Python & Git Basics",
-  2: "FastAPI Development",
-  3: "SQL Databases",
-  4: "NoSQL Stores",
-  5: "Redis Caching",
-  6: "LLM APIs Intro",
   7: "Embeddings",
   8: "Vector Databases",
   9: "Semantic Search",
@@ -37,92 +31,122 @@ const TOPICS = {
   31: "Capstone Project",
 };
 
-export default function Chat({ messages, isThinking, progress, sessionStatus }) {
+export default function Chat({ messages, isThinking, sessionStatus, isFocusMode, setIsFocusMode }) {
   const scrollRef = useRef(null);
   
   const questionCount = sessionStatus?.question_count || 1;
   const coveredDays = sessionStatus?.covered_days || [];
-  const currentStage = sessionStatus?.interview_stage || "INTERVIEWING";
-  const isPendingFollowUp = sessionStatus?.pending_follow_up?.is_pending || false;
 
-  // Auto-scroll logic
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (!isFocusMode) {
+      scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isThinking]);
+  }, [messages, isThinking, isFocusMode]);
 
-  // Calculate progress percentage
+  // Calculate non-linear progress step
   const progressPercent = Math.min((questionCount / 8) * 100, 100);
 
+  const listVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.08
+      }
+    }
+  };
+
+  const chipVariants = {
+    hidden: { opacity: 0, y: 12, scale: 0.95 },
+    show: { 
+      opacity: 1, 
+      y: 0, 
+      scale: 1,
+      transition: { type: "spring", stiffness: 200, damping: 15 } 
+    }
+  };
+
+  const lastMsg = messages[messages.length - 1];
+  const showFocusOverlay = isFocusMode && lastMsg && lastMsg.role === 'assistant' && !isThinking;
+
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden w-full max-w-[800px] mx-auto px-4">
-      {/* Top Header Card: Progress & Covered Topics */}
+    <div className="flex-1 flex flex-col h-full overflow-hidden w-full max-w-[800px] mx-auto px-4 relative">
+      
+      {/* Top Header Card: Smart Adaptive Progress */}
       <motion.div 
-        initial={{ opacity: 0, y: -20 }}
+        initial={{ opacity: 0, y: -15 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-card p-4 rounded-2xl border-purple-500/10 mb-6 flex flex-col gap-3 relative overflow-hidden"
+        className="glass-card p-5 rounded-2xl border-purple-500/10 mb-6 flex flex-col gap-4 relative overflow-hidden z-10"
       >
         <div className="absolute top-0 left-0 h-[2px] bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 w-full" />
         
         {/* Progress Bar Header */}
-        <div className="flex justify-between items-center text-xs">
-          <div className="flex items-center gap-2 text-zinc-300">
-            <Sparkles size={14} className="text-purple-400 animate-pulse" />
-            <span className="font-semibold">Technical Validation Stage</span>
+        <div className="flex justify-between items-end">
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-2 text-zinc-200">
+              <Sparkles size={14} className="text-purple-400 animate-pulse shrink-0" />
+              <span className="font-semibold text-sm tracking-tight font-display">Adaptive Interview Progress</span>
+            </div>
+            <span className="text-[10px] text-zinc-500 font-medium">
+              Adapting based on your responses
+            </span>
           </div>
-          <span className="text-purple-400 font-mono font-bold">
-            Question {questionCount} of 8+
+          <span className="text-purple-400 font-mono font-bold text-xs bg-purple-950/30 px-2 py-0.5 rounded border border-purple-500/10 animate-pulse">
+            Q{questionCount} / 8+
           </span>
         </div>
 
-        {/* Progress Bar Line */}
-        <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800/50">
+        {/* Progress Bar Line with soft neon glow */}
+        <div className="w-full h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900 relative">
           <motion.div 
             initial={{ width: 0 }}
             animate={{ width: `${progressPercent}%` }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-            className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
-          />
+            transition={{ duration: 0.8, ease: "easeInOut" }}
+            className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 rounded-full relative shadow-[0_0_15px_rgba(168,85,247,0.6)]"
+          >
+            <div className="absolute top-0 right-0 bottom-0 left-0 bg-white/20 animate-pulse" />
+          </motion.div>
         </div>
 
-        {/* Covered Days Chips */}
+        {/* Domain Tracking chips */}
         {coveredDays.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 mt-1 border-t border-zinc-800/40 pt-3">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold mr-1 flex items-center gap-1">
+          <div className="flex flex-col gap-2 mt-1 border-t border-zinc-900/60 pt-3">
+            <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-1">
               <Layers size={10} />
-              Domains Probed:
+              Covered Core Topics
             </span>
-            <AnimatePresence>
+            <motion.div 
+              variants={listVariants}
+              initial="hidden"
+              animate="show"
+              className="flex flex-wrap gap-1.5"
+            >
               {coveredDays.map((dayNum) => (
                 <motion.span
                   key={dayNum}
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="text-[11px] font-medium bg-purple-950/20 border border-purple-500/20 text-purple-300 px-2 py-0.5 rounded-md flex items-center gap-1"
+                  variants={chipVariants}
+                  className="text-[11px] font-medium bg-purple-950/20 border border-purple-500/20 text-purple-300 px-2.5 py-0.5 rounded-md flex items-center gap-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.2)] hover:border-purple-500/40 transition-all duration-200 hover:scale-105"
                 >
                   <BookOpen size={10} className="opacity-70" />
                   {TOPICS[dayNum] || `Day ${dayNum}`}
                 </motion.span>
               ))}
-            </AnimatePresence>
+            </motion.div>
           </div>
         )}
       </motion.div>
 
       {/* Message Scroll Container */}
-      <div className="flex-1 overflow-y-auto px-1 py-4 space-y-4 rounded-2xl">
+      <div className="flex-1 overflow-y-auto px-1 py-4 space-y-4 rounded-2xl scroll-smooth">
         <div className="flex flex-col min-h-full justify-end">
           {messages.map((msg, index) => (
             <MessageBubble 
               key={msg.id || index} 
               message={msg} 
-              isLast={index === messages.length - 1} 
             />
           ))}
 
-          {/* Thinking State */}
+          {/* Thinking State with Waveform reasoning bar */}
           {isThinking && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -136,16 +160,30 @@ export default function Chat({ messages, isThinking, progress, sessionStatus }) 
                 <span className="text-[11px] font-medium tracking-wider uppercase opacity-40 px-1">
                   AI Agent
                 </span>
-                <div className="p-4 rounded-2xl glass-card border-purple-500/10 text-zinc-400 rounded-tl-none flex items-center gap-3">
-                  <div className="flex gap-1.5">
-                    <span className="w-2.5 h-2.5 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2.5 h-2.5 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2.5 h-2.5 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <motion.div 
+                  animate={{ opacity: [0.3, 1, 0.3] }}
+                  transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
+                  className="p-4 rounded-2xl glass-card border-purple-500/10 text-zinc-400 rounded-tl-none flex items-center gap-4.5 shadow-[0_0_15px_rgba(168,85,247,0.05)] relative overflow-hidden"
+                >
+                  {/* Subtle Shimmer background */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-purple-500/5 to-transparent -translate-x-full animate-[shimmer_2s_infinite]" />
+                  
+                  {/* Neon Jumping Waveform */}
+                  <div className="flex items-center gap-1.5 h-4.5 shrink-0 px-1">
+                    <span className="w-1 h-3.5 bg-gradient-to-t from-purple-500 to-pink-500 rounded-full origin-bottom animate-[wave_1.2s_ease-in-out_infinite_0ms]" />
+                    <span className="w-1 h-5 bg-gradient-to-t from-purple-500 to-pink-500 rounded-full origin-bottom animate-[wave_1.2s_ease-in-out_infinite_150ms]" />
+                    <span className="w-1 h-2.5 bg-gradient-to-t from-purple-500 to-pink-500 rounded-full origin-bottom animate-[wave_1.2s_ease-in-out_infinite_300ms]" />
+                    <span className="w-1 h-6 bg-gradient-to-t from-purple-500 to-pink-500 rounded-full origin-bottom animate-[wave_1.2s_ease-in-out_infinite_450ms]" />
+                    <span className="w-1 h-4 bg-gradient-to-t from-purple-500 to-pink-500 rounded-full origin-bottom animate-[wave_1.2s_ease-in-out_infinite_600ms]" />
                   </div>
-                  <span className="text-xs font-medium animate-pulse text-zinc-500">
-                    AI is analyzing your answer...
+                  
+                  <span className="text-xs font-semibold text-zinc-400 tracking-wide select-none flex items-center gap-1.5">
+                    Analyzing response
+                    <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
+                    <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
+                    <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
                   </span>
-                </div>
+                </motion.div>
               </div>
             </motion.div>
           )}
@@ -153,6 +191,53 @@ export default function Chat({ messages, isThinking, progress, sessionStatus }) 
           <div ref={scrollRef} />
         </div>
       </div>
+
+      {/* Focus Mode Question Overlay (Center-Screen Reading layout) */}
+      <AnimatePresence>
+        {showFocusOverlay && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/75 backdrop-blur-md flex flex-col items-center justify-center z-40 p-6 pointer-events-auto"
+          >
+            <motion.div 
+              initial={{ scale: 1.0, opacity: 0, y: 20 }}
+              animate={{ scale: 1.02, opacity: 1, y: 0 }}
+              exit={{ scale: 1.0, opacity: 0, y: 20 }}
+              transition={{ type: "spring", stiffness: 220, damping: 20 }}
+              className="glass-card max-w-[800px] w-full rounded-3xl p-8 border-purple-500/20 shadow-[0_0_60px_rgba(168,85,247,0.12)] relative"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div className="inline-flex items-center gap-2 bg-purple-500/10 border border-purple-500/20 text-purple-400 px-3 py-1 rounded-full text-xs font-semibold tracking-wider uppercase font-display shadow-[0_0_10px_rgba(168,85,247,0.15)]">
+                  <Sparkles size={12} className="animate-pulse" />
+                  Active Focus Question
+                </div>
+                
+                <button
+                  onClick={() => setIsFocusMode(false)}
+                  className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-[10px] uppercase font-bold text-zinc-400 hover:text-white rounded-lg cursor-pointer"
+                >
+                  Dismiss Focus Mode [Esc]
+                </button>
+              </div>
+
+              {/* Large, relaxed line-spaced typography centered reading layout */}
+              <div className="text-zinc-100 text-2xl font-medium font-sans leading-relaxed text-left max-h-[50vh] overflow-y-auto pr-2">
+                <p className="whitespace-pre-wrap leading-loose text-zinc-200">
+                  {lastMsg.content}
+                </p>
+              </div>
+
+              {/* Responsive indicator badge */}
+              <div className="mt-8 pt-4 border-t border-zinc-900/60 flex items-center gap-3 text-xs text-zinc-500 font-medium font-sans">
+                <Keyboard size={16} className="text-purple-400 animate-pulse" />
+                <span className="animate-pulse text-zinc-400">Start typing your answer below to resume context...</span>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

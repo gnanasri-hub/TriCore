@@ -271,7 +271,7 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
         state.history.append({"role": "assistant", "content": follow_up_text})
         state.question_count += 1
         _save_state(session_id, state)
-        return InterviewResponse(reply=follow_up_text, done=False)
+        return InterviewResponse(reply=follow_up_text, done=False, evaluation=eval_result.model_dump())
 
     # ── Commit Q&A record (shared by new_question and end paths) ─────────────
     if pending.get("is_pending"):
@@ -333,4 +333,4 @@ def process_message(session_id: str, message: str) -> InterviewResponse:
     state.question_count += 1
 
     _save_state(session_id, state)
-    return InterviewResponse(reply=next_question, done=False)
+    return InterviewResponse(reply=next_question, done=False, evaluation=eval_result.model_dump())

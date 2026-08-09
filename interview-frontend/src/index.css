@@ -1,6 +1,17 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1.2); }
+}
+
 :root {
   font-family: 'Inter', system-ui, sans-serif;
   color-scheme: dark;
@@ -9,7 +20,9 @@
 body {
   margin: 0;
   padding: 0;
-  background-color: #030303;
+  background: linear-gradient(-45deg, #030303, #0a0614, #030305, #080512);
+  background-size: 400% 400%;
+  animation: gradientShift 25s ease infinite;
   color: #f3f4f6;
   overflow-x: hidden;
   min-height: 100vh;

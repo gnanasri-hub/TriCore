@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { SendHorizontal } from 'lucide-react';
 
-export default function InputBox({ onSendMessage, disabled, placeholder }) {
+export default function InputBox({ onSendMessage, disabled, placeholder, onStartTyping }) {
   const [text, setText] = useState('');
   const inputRef = useRef(null);
 
@@ -22,12 +22,15 @@ export default function InputBox({ onSendMessage, disabled, placeholder }) {
 
   return (
     <form onSubmit={handleSubmit} className="relative w-full">
-      <div className="relative flex items-center glass-card border-zinc-800 rounded-2xl overflow-hidden focus-within:border-purple-500/30 transition-all duration-300 shadow-lg px-2 py-1.5 gap-2">
+      <div className="relative flex items-center glass-card border-zinc-800 rounded-2xl overflow-hidden focus-within:border-purple-500/40 focus-within:ring-2 focus-within:ring-purple-500/15 transition-all duration-300 shadow-[0_0_20px_rgba(168,85,247,0.05)] px-2 py-1.5 gap-2">
         <textarea
           ref={inputRef}
           rows={1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (onStartTyping) onStartTyping();
+          }}
           onKeyDown={handleKeyDown}
           placeholder={disabled ? "Waiting for AI..." : placeholder || "Type your answer..."}
           disabled={disabled}
@@ -37,8 +40,8 @@ export default function InputBox({ onSendMessage, disabled, placeholder }) {
         <motion.button
           type="submit"
           disabled={!text.trim() || disabled}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
+          whileHover={{ scale: 1.08, boxShadow: "0 0 15px rgba(168, 85, 247, 0.4)" }}
+          whileTap={{ scale: 0.92 }}
           className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-300 shrink-0 cursor-pointer ${
             text.trim() && !disabled
               ? 'bg-purple-600 hover:bg-purple-500 text-white glow-btn-purple'

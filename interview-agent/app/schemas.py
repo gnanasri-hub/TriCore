@@ -144,6 +144,7 @@ class InterviewResponse(BaseModel):
     reply:    str
     done:     bool
     feedback: Optional[Feedback] = None
+    evaluation: Optional[Dict[str, Any]] = None
 
 
 # ── Session state (internal) ──────────────────────────────────────────────────
