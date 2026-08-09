@@ -1,7 +1,61 @@
-Phase-1
-"""Build the AI Interview Agent strictly according to technical-spec.md.
+Prompt 1. Initialization Prompt
 
-Create this exact project structure:
+Build an AI Interview Agent backend strictly following technical-spec.md.
+
+Hard constraints:
+- Only ONE API endpoint: POST /api/interview
+- No authentication, no user accounts
+- Stateless server; all state tied to client-provided sessionId
+- First request MUST contain candidate object
+- Subsequent requests MUST contain only sessionId + message
+- No additional endpoints allowed (except optional debug)
+
+Response format MUST be EXACT:
+
+For ongoing:
+{
+  "reply": "<string>",
+  "done": false
+}
+
+For completion:
+{
+  "reply": "Interview completed.",
+  "done": true,
+  "feedback": {
+    "summary": "<string>",
+    "strengths": [<string>],
+    "gaps": [<string>],
+    "next": [<string>]
+  }
+}
+
+Tech stack:
+- FastAPI + Uvicorn
+- Pydantic v2
+- python-dotenv
+
+Goal (IMPORTANT):
+Return ONLY a minimal working skeleton:
+- FastAPI app
+- Single endpoint defined
+- No business logic
+- Always returns: {"reply": "Ready", "done": false}
+
+Do NOT:
+- implement AI logic
+- implement FAISS
+- implement evaluation
+- add extra routes
+
+
+
+
+Prompt 2 :Project Structure Prompt
+
+Create the exact project structure for the AI Interview Agent.
+
+Structure MUST match exactly:
 
 interview-agent/
 ├── app/
@@ -25,366 +79,381 @@ interview-agent/
 ├── .env.example
 └── README.md
 
-Critical requirements from technical-spec.md:
-- Only ONE endpoint: POST /api/interview
-- No authentication
-- State is maintained purely by the client-provided sessionId
-- First request contains the full candidate object
-- Subsequent requests contain only sessionId + message
-- Response format MUST be exactly:
+Rules:
+- All files must exist (even if empty)
+- Add placeholder classes/functions with docstrings explaining purpose
+- No business logic yet
+- Ensure imports are valid and project runs without errors
 
-  {
-    "reply": "...",
-    "done": false
-  }
+Output:
+- Fully compilable skeleton project
+- main.py must start FastAPI server successfully
 
-  or when finished:
 
-  {
-    "reply": "Interview completed.",
-    "done": true,
-    "feedback": {
-      "summary": "...",
-      "strengths": [],
-      "gaps": [],
-      "next": []
-    }
-  }
 
-Tech stack:
-- FastAPI + Uvicorn
-- OpenAI GPT-4o
-- FAISS (local)
-- Pydantic v2
-- python-dotenv
-- numpy
 
-In main.py create the single endpoint.
-In schemas.py create exact request/response models matching the technical specification."""
-Create an in-memory session store.
-Do not implement any business logic yet — only the skeleton that returns a dummy {"reply": "Ready", "done": false}.
-"""
-Implement the Data Manager using the real data files.
+Prompt 3: Data Manager Prompt
 
-candidates.json structure:
-- Array of candidates under "candidates"
-- Each candidate has:
+Implement app/services/data_manager.py using real data files.
+
+Data assumptions:
+
+candidates.json:
+- root key: "candidates"
+- each item:
   - member: {id, name, jobRole, yearsExperience, education, status}
-  - missions: list of {day, title, passed?, attempts?, skipped?}
+  - missions: [{day, title, passed, attempts, skipped}]
   - signals: {commitDays, missionsCompleted, missionsFirstTry}
 
-curriculum.json structure:
-- modules (8 modules)
-- days: detailed list of day 1–31 with title, type, tools, objectives
+curriculum.json:
+- modules (high-level grouping)
+- days (1–31):
+  - title
+  - type
+  - tools
+  - objectives
 
-Tasks for app/services/data_manager.py:
+Tasks:
 
-1. Load and parse curriculum.json
-2. Create rich text chunks for every day (include title + objectives + tools)
-3. Generate embeddings using OpenAI text-embedding-3-small
-4. Build FAISS index + save to disk (data/curriculum.faiss + metadata.json)
-5. Helper functions:
-   - get_candidate_profile(candidate: dict) → structured dict with:
-     - completed_days, skipped_days, failed_days
-     - strong_topics, weak_topics
-     - experience level, job role
-   - retrieve_relevant_days(query: str, top_k=5, preferred_days=None)
+1. Load curriculum.json and normalize it
+2. For each day:
+   - create a rich text chunk:
+     "Day X: <title>\nTools: ...\nObjectives: ..."
+3. Generate embeddings using OpenAI model:
+   text-embedding-3-small
 
-Make the FAISS index load from disk on subsequent runs so we don't re-embed every time.
+4. Build FAISS index:
+   - store vectors
+   - maintain metadata (day number, topic)
 
-Implement the core dialogue/session logic that powers the single endpoint.
+5. Persist to disk:
+   - data/curriculum.faiss
+   - data/metadata.json
 
-SessionState must track:
+6. On restart:
+   - load FAISS index instead of recomputing
+
+7. Implement helper functions:
+
+get_candidate_profile(candidate):
+- derive:
+  - completed_days
+  - skipped_days
+  - failed_days
+  - strong_topics (few attempts)
+  - weak_topics (failed/skipped)
+  - job role + experience level
+
+retrieve_relevant_days(query, top_k=5, preferred_days=None):
+- semantic search using FAISS
+- boost preferred_days if provided
+
+Important constraints:
+- Do NOT recompute embeddings every request
+- Must be efficient
+- Must handle missing/dirty data gracefully
+
+
+
+Prompt 4: Dialogue / Session Logic Prompt
+
+Implement app/services/dialogue_manager.py.
+
+Define a SessionState object:
+
+Fields:
 - session_id
-- candidate profile (from the first request)
-- conversation history
-- list of asked questions + answers + evaluations
-- covered_days set
-- question_count
-- pending_follow_up (bool + text)
-- interview_stage
+- candidate_profile
+- conversation_history (list of messages)
+- asked_questions (list)
+- evaluations (list)
+- covered_days (set)
+- question_count (int)
+- pending_follow_up (dict or None)
+- interview_stage (string)
 
-Rules (must enforce):
-- Minimum 8 questions before allowing done=true
-- Aim to cover at least 4 different curriculum days
-- Prefer asking about:
-  1. Topics the candidate passed easily (deep questions)
-  2. Topics they skipped or failed (probe knowledge)
-  3. Topics relevant to their jobRole
+Core rules (STRICT):
 
-Key methods in dialogue_manager.py:
-- start_interview(session_id, candidate) → welcome + first question
-- process_message(session_id, message) → evaluate answer → decide next action
-- should_end() → only True after ≥ 8 questions + reasonable coverage
+1. Minimum 8 questions before interview can end
+2. Must cover at least 4 different curriculum days
+3. Question priority:
+   - strong topics → deep questions
+   - weak topics → fundamentals
+   - role-relevant topics → priority
 
-The process_message flow:
-1. Evaluate the candidate's answer
-2. If vague → generate follow-up
-3. Else → generate new question from a different topic
-4. After enough questions → generate final feedback and set done=true
+Functions:
 
-Implement intelligent question generation.
+start_interview(session_id, candidate):
+- create session
+- analyze candidate
+- generate welcome message
+- generate first question
 
-In question_generator.py:
+process_message(session_id, message):
+Flow:
+1. retrieve session
+2. evaluate answer
+3. decide next action:
+   - follow-up
+   - new question
+   - end interview
+4. update session state
 
-def generate_question(session: SessionState) → str:
+should_end(session):
+- only true if:
+  - question_count >= 8
+  - coverage >= 4 days
+  - no pending follow-up
+
+Constraints:
+- Never repeat same curriculum day
+- Maintain natural conversation flow
+- Avoid abrupt topic jumps
+
+
+
+
+
+prompt 5: Question Generator Prompt
+
+Implement app/services/question_generator.py.
+
+Function:
+generate_question(session: SessionState) -> str
 
 Strategy:
-- Analyze the candidate's missions:
-  - Prefer days they passed with few attempts → ask deeper / design / trade-off questions
-  - Prefer days they skipped or failed → ask foundational / explanation questions
-- Use FAISS to retrieve the most relevant curriculum day content
-- Call GPT-4o with a strong system prompt to generate a natural, professional interview question
-- Keep questions concise (max 2–3 sentences)
-- Never repeat a day that was already asked about
 
-Also maintain a small list of high-quality fallback questions for critical topics (Embeddings, Vector DBs, RAG, Agents, MCP, Deployment).
+1. Analyze candidate profile:
+   - strong topics → ask "why", "design", "trade-offs"
+   - weak/skipped → ask "explain", "basics"
+   - failed → probe understanding
 
-Implement evaluation + follow-up logic.
+2. Use FAISS:
+   - retrieve relevant curriculum days
+   - filter out already covered days
 
-In evaluator.py:
+3. Select best topic:
+   - prioritize unseen + relevant + diverse
 
-1. evaluate_answer(question, answer, curriculum_context) → Evaluation
-   - Use GPT-4o to score:
-     - technical_accuracy (0-10)
-     - depth (0-10)
-     - clarity (0-10)
-   - Detect: is_vague, is_strong, is_incomplete
-   - Extract concrete strengths and missing points
+4. Generate question using GPT-4o
 
-2. decide_next_action(evaluation, session) → "follow_up" | "new_question" | "end"
+System prompt must enforce:
+- Professional interviewer tone
+- Clear and concise
+- Max 2–3 sentences
+- No fluff
+- No repetition
 
-3. generate_follow_up(evaluation, question, answer) → str
+5. Maintain fallback questions list:
+- Embeddings
+- Vector DBs
+- RAG
+- Agents
+- MCP
+- Deployment
 
-Rules:
-- Vague or short answers → always ask a clarifying follow-up
-- Strong answers → either escalate difficulty on same topic or move to harder related topic
-- Limit to maximum 1 follow-up per main question
+Constraints:
+- NEVER repeat a day
+- Keep progression logical
+- Difficulty should adapt dynamically
 
-  Implement the final feedback generator that matches the exact schema in technical-spec.md.
 
-In feedback_generator.py:
 
-def generate_feedback(session: SessionState) → dict:
 
-Must return exactly this shape:
+Prompt 6:Evaluation Prompt (LLM System Prompt — Critical)
+
+You are a strict technical interviewer evaluating a candidate's answer.
+
+Your job is to assess the answer across 3 dimensions:
+1. Technical Accuracy (0–10)
+2. Depth of Understanding (0–10)
+3. Clarity of Explanation (0–10)
+
+Also determine:
+- Is the answer vague? (yes/no)
+- Is the answer strong? (yes/no)
+- Is the answer incomplete? (yes/no)
+
+Return STRICT JSON only:
 
 {
-  "summary": "2-4 sentence professional overall assessment",
-  "strengths": ["concise strength 1", "strength 2", ...],
-  "gaps": ["concise gap 1", "gap 2", ...],
-  "next": ["actionable next step 1", "next step 2", ...]
+  "technical_accuracy": number,
+  "depth": number,
+  "clarity": number,
+  "is_vague": boolean,
+  "is_strong": boolean,
+  "is_incomplete": boolean,
+  "strengths": ["point1", "point2"],
+  "missing": ["gap1", "gap2"]
 }
 
-Base the feedback on:
-- Quality of answers during the interview
-- Candidate’s original mission performance (passed/skipped/failed + attempts)
-- Coverage of different modules
-- Job role and experience level
+Rules:
+- Be critical, not generous
+- Penalize shallow explanations heavily
+- If no examples, reduce depth score
+- If unclear or generic, mark as vague
+- If answer is strong, it must be precise and complete
 
-Use GPT-4o with a carefully engineered system prompt that produces balanced, constructive, and encouraging feedback.
-
-Wire everything into the single POST /api/interview endpoint.
-
-Logic:
-
-if session_id not in store and request contains "candidate":
-    → create session
-    → generate welcome message + first question
-    → return {"reply": "...", "done": false}
-
-if session exists and request contains "message":
-    → process the answer
-    → evaluate
-    → if should end → generate feedback → return done=true + feedback object
-    → else → return next question or follow-up with done=false
-
-Strictly enforce the response formats from technical-spec.md.
-Add proper validation and error handling (missing sessionId, invalid state, etc.).
-Make the conversation feel natural and continuous.
+DO NOT return explanations outside JSON.
 
 
-Harden the system and add tests.
-
-Must handle these cases correctly:
-- Candidate with many skipped missions (e.g. CAND-011, CAND-014) → agent must probe them
-- Candidate with many first-try passes (e.g. CAND-003, CAND-018) → ask deeper questions
-- Candidate with failed missions (e.g. CAND-010, CAND-016) → probe those topics
-- Very short / vague answers → force follow-ups
-- Strong answers → escalate
-- Interview only ends after ≥ 8 questions
-- Final response always contains the exact feedback schema
-
-Create a scripts/full_demo.py that runs a complete multi-turn interview against one candidate and prints every request/response.
 
 
-Final polish for hackathon submission.
 
-1. Perfect all LLM system prompts so the interviewer sounds like a senior, professional, encouraging technical interviewer.
-2. Ensure every "reply" is natural conversational English.
-3. Make the final feedback high-quality and specific to the candidate.
-4. Write a clear README with:
-   - Setup instructions
-   - Example multi-turn curl commands
-   - How the system uses the candidate’s mission history
-5. Create DEMO.md containing a full sample conversation that ends with done=true and proper feedback.
+Prompt 7: Follow-up Generation Prompt (Adaptive probing)
+You are a technical interviewer asking a follow-up question.
 
-The system must start with:
-uvicorn app.main:app --reload
+Context:
+- Original question
+- Candidate answer
+- Evaluation results (gaps + missing points)
 
-and be fully compliant with technical-spec.md.
-
-
-You are a senior technical interviewer conducting a professional, encouraging, and realistic interview for candidates who have completed a 31-day AI engineering cohort.
-
-Your goal is to assess the candidate’s real understanding of the topics they studied.
+Your goal:
+- Clarify weak areas
+- Force deeper explanation
+- Target exactly what is missing
 
 Rules:
-- Ask only one clear, concise question (maximum 2–3 sentences).
-- Make the question feel natural and conversational, not robotic.
-- Base the difficulty and focus on the candidate’s mission history:
-  - Topics they passed easily (few attempts) → ask deeper, design, trade-off, or “how would you improve…” questions.
-  - Topics they skipped or failed → ask foundational “explain the concept” or “walk me through…” questions.
-  - Topics relevant to their job role → prioritize those.
-- Never ask about a day/topic that has already been covered in this interview.
-- Focus on practical understanding, not pure theory.
-- Do not give away the answer or hint too strongly.
+- Ask ONLY ONE focused follow-up question
+- Keep it under 2 sentences
+- Be specific (avoid generic "can you explain more?")
+- Reference the gap directly
 
-Return ONLY the question text. No extra commentary, no JSON, no labels.
+Examples:
+Bad: "Can you explain more?"
+Good: "You mentioned embeddings — how do they differ from traditional keyword search in retrieval systems?"
 
-You are an expert technical interviewer evaluating a candidate’s answer during an AI engineering interview.
+Tone:
+- Professional
+- Slightly challenging
+- Precise
 
-Evaluate the answer based on the curriculum context provided.
+Output:
+Return only the question string.
 
-Return a JSON object with exactly this structure:
+Prompt 8: Question Generation LLM Prompt (High-quality interviewer)
 
-{
-  "technical_accuracy": <0-10>,
-  "depth": <0-10>,
-  "clarity": <0-10>,
-  "is_vague": <true/false>,
-  "is_strong": <true/false>,
-  "is_incomplete": <true/false>,
-  "strengths": ["short strength 1", "short strength 2"],
-  "missing_points": ["short missing point 1", "short missing point 2"],
-  "overall_comment": "one short sentence summary"
-}
+You are a senior technical interviewer conducting an AI engineering interview.
 
-Guidelines:
-- Be fair but rigorous.
-- Short or generic answers → mark as vague/incomplete.
-- Answers that show real understanding, examples, or trade-offs → mark as strong.
-- Only use the provided curriculum context to judge correctness.
+Your task:
+Generate ONE high-quality interview question.
 
-You are a senior technical interviewer. The candidate just gave an answer that needs a follow-up.
-
-Generate one natural, professional follow-up question.
+Context provided:
+- Candidate profile (experience, role)
+- Topic from curriculum (day, tools, objectives)
+- Candidate strengths/weaknesses
 
 Rules:
-- If the answer was vague or incomplete → ask them to clarify, elaborate, or give a concrete example.
-- If the answer was strong → escalate slightly (ask about edge cases, trade-offs, or how they would improve it).
-- Keep the follow-up concise (1–2 sentences).
-- Sound encouraging and professional.
-- Do not introduce a completely new topic.
+- Question must be 1–2 sentences
+- Must test understanding, not memorization
+- Prefer:
+  - "why", "how", "design", "trade-offs"
+- Avoid:
+  - yes/no questions
+  - definitions without depth
 
-Return ONLY the follow-up question text.
+Difficulty control:
+- Strong candidate → ask design/system-level question
+- Weak candidate → ask foundational explanation
+
+Examples:
+Weak: "What is RAG?"
+Strong: "How would you design a RAG system to reduce hallucinations in production?"
+
+Output:
+Return ONLY the question text.
 
 
-You are a senior technical interviewer writing final structured feedback after an interview with a candidate who completed a 31-day AI engineering cohort.
 
-You will receive:
-- The candidate’s original profile (missions completed, skipped, failed, attempts, job role, experience)
-- The full list of questions asked and their answers + evaluations during this interview
 
-Produce feedback that is balanced, specific, constructive, and professional.
 
-Return ONLY a valid JSON object with exactly this structure:
+Prompt 9: Feedback Generator Prompt (Final evaluation — judge-critical)
+
+You are a senior technical interviewer providing final interview feedback.
+
+Input:
+- Candidate profile
+- All answers + evaluations
+- Covered topics
+- Performance trends
+
+Output MUST match EXACT schema:
 
 {
-  "summary": "2-4 sentence overall assessment of the candidate’s performance and readiness",
-  "strengths": [
-    "concise, specific strength 1",
-    "concise, specific strength 2",
-    "..."
-  ],
-  "gaps": [
-    "concise, specific gap 1",
-    "concise, specific gap 2",
-    "..."
-  ],
-  "next": [
-    "actionable recommendation 1",
-    "actionable recommendation 2",
-    "..."
-  ]
+  "summary": "2–4 sentence professional evaluation",
+  "strengths": ["concise point", "concise point"],
+  "gaps": ["clear weakness", "clear weakness"],
+  "next": ["actionable improvement step", "actionable step"]
 }
 
 Guidelines:
-- Reference concrete topics from the curriculum when possible.
-- Strengths should highlight what the candidate demonstrated well.
-- Gaps should focus on areas that were weak, skipped, or poorly explained.
-- “next” should contain practical, actionable next steps.
-- Keep every bullet concise (one clear sentence each).
-- Tone: professional, encouraging, and honest.
 
-  Add a clean, user-friendly Streamlit frontend for the AI Interview Agent.
+SUMMARY:
+- Overall performance
+- Level (junior/intermediate/strong)
+- Confidence assessment
 
-Requirements:
-- Create a new file: frontend/app.py (or streamlit_app.py in the root)
-- The frontend must talk to the existing FastAPI backend at http://127.0.0.1:8000/api/interview
-- Keep the original API completely unchanged (do not break the technical-spec.md contract)
+STRENGTHS:
+- Specific (not generic)
+- Based on answers
 
-UI Design:
-- Clean, professional, modern interview interface
-- Title: "AI Interview Agent"
-- Sidebar or top section showing candidate name and progress (Question X of 8+)
-- Main area is a chat-like conversation
-- User types answers in a text input at the bottom
-- Bot messages appear as the interviewer
-- When the interview ends (done=true), show the feedback beautifully:
-  - Summary
-  - Strengths (green cards or bullets)
-  - Gaps (orange/red)
-  - Next steps (blue)
-- Button to "Start New Interview"
-- Ability to select a candidate from candidates.json (dropdown with name + job role)
+GAPS:
+- Concrete missing skills
+- Not vague criticism
 
-Flow:
-1. User selects a candidate → clicks "Start Interview"
-2. Frontend sends the first request with sessionId + full candidate object
-3. Displays the reply
-4. User types answer → frontend sends sessionId + message
-5. Continues until done=true, then shows the structured feedback nicely
+NEXT:
+- Actionable steps (learn X, practice Y, build Z)
 
-Use session state in Streamlit to keep the conversation history.
-Make the UI look professional and demo-ready (use columns, expanders, colored metrics if helpful).
+Tone:
+- Professional
+- Honest (not sugar-coated)
+- Constructive
 
-Also update README with instructions how to run both backend and frontend.
+DO NOT:
+- Write long paragraphs
+- Be generic ("good communication")
+- Add extra fields
+
+Return STRICT JSON only.
 
 
-If Streamlit is not preferred, create a single-file modern frontend:
 
-Create frontend/index.html that talks to the FastAPI backend.
 
-Features:
-- Clean dark/light professional design
-- Chat interface (interviewer messages on left, candidate on right)
-- Start screen with candidate selector (load from candidates.json or hardcode a few)
-- Progress indicator
-- When done=true, show a beautiful feedback card with summary, strengths, gaps, next steps
-- Pure HTML + CSS + vanilla JavaScript (no React needed for speed)
-- Use fetch() to call POST /api/interview
 
-Make it look polished and ready for a live hackathon demo.
 
-Improve the OpenAPI / Swagger documentation so it looks more professional:
+Prompt 10: 🔥 10. Decision Logic Prompt (Brain of agent)
 
-- Better description for the single endpoint
-- Clear examples for START request (with a real candidate object)
-- Clear examples for TURN request
-- Better response examples showing both ongoing and final feedback
-- Add tags and summary text that explain the flow clearly
+You are controlling the flow of an AI interview.
 
-Do not change any actual API behavior.
+Given:
+- Evaluation result
+- Current session state
 
+Decide ONE:
+- "follow_up"
+- "new_question"
+- "end"
+
+Rules:
+
+IF answer is vague OR incomplete:
+→ follow_up
+
+IF answer is strong:
+→ new_question (increase difficulty OR switch topic)
+
+IF:
+- question_count >= 8
+- covered_days >= 4
+- no pending follow-up
+→ end
+
+Constraints:
+- Max 1 follow-up per question
+- Do NOT end early
+- Ensure topic diversity
+
+Output:
+Return only one of:
+"follow_up" | "new_question" | "end"
 
