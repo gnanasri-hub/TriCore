@@ -28,7 +28,7 @@ from typing import Any, Dict, Tuple
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BASE_URL   = "http://localhost:8000"
-SESSION_ID = "demo-cand-001-final"
+SESSION_ID = "demo-cand-001-run2"
 AGENT_ROOT = Path(__file__).resolve().parent.parent
 
 # ── ANSI colours (graceful fallback on Windows) ───────────────────────────────

@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 MIN_ANSWER_LENGTH = 15
 
 
+def _get_client():
+    return data_manager.get_groq_client()
+
+
 class Evaluation(BaseModel):
     technical_accuracy: int = Field(ge=0, le=10, description="Technical accuracy score 0-10")
     depth: int = Field(ge=0, le=10, description="Depth of answer 0-10")
@@ -96,7 +100,7 @@ Use exactly this structure:
         f"Candidate's answer:\n{answer}"
     )
 
-    client = data_manager.get_groq_client()
+    client = _get_client()
     try:
         response = client.chat.completions.create(
             model=config.GROQ_MODEL,
@@ -210,7 +214,7 @@ Output only the question text — no preamble, no labels."""
         f"Instruction: {follow_up_instruction}"
     )
 
-    client = data_manager.get_groq_client()
+    client = _get_client()
     try:
         response = client.chat.completions.create(
             model=config.GROQ_MODEL,

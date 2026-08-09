@@ -122,12 +122,24 @@ class TestBadRequest:
         })
         assert resp.status_code == 400
 
-    def test_candidate_missing_member_key(self, client):
+    def test_candidate_missing_required_fields(self, client):
         resp = client.post("/api/interview", json={
-            "sessionId": "s-no-member",
-            "candidate": {"missions": []},   # no "member" key
+            "sessionId": "s-missing-fields",
+            "candidate": {"missions": []},   # no id, name, role
         })
         assert resp.status_code == 400
+
+    def test_flat_candidate_format_success(self, client):
+        resp = client.post("/api/interview", json={
+            "sessionId": "s-flat-success",
+            "candidate": {
+                "id": "CAND-999",
+                "name": "Alex flat",
+                "role": "DevOps Engineer",
+            },
+        })
+        assert resp.status_code == 200
+
 
     def test_missing_session_id_field(self, client):
         resp = client.post("/api/interview", json={"candidate": CANDIDATE_PAYLOAD})

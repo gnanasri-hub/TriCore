@@ -124,6 +124,10 @@ next (3–4 items):
 """
 
 
+def _get_client():
+    return data_manager.get_groq_client()
+
+
 def generate_feedback(profile: Dict[str, Any], qa_records: List[Dict[str, Any]]) -> dict:
     """
     Generate final structured feedback using Groq (llama-3.3-70b-versatile).
@@ -175,7 +179,8 @@ def generate_feedback(profile: Dict[str, Any], qa_records: List[Dict[str, Any]])
     cohort_summary = "\n".join(cohort_lines)
 
     system_prompt = _build_system_prompt(name, role, years, level, cohort_summary, qa_narrative)
-    client = data_manager.get_groq_client()
+    client = _get_client()
+
 
     def _call_llm(extra_instruction: str = "") -> dict:
         user_msg = "Generate the final structured feedback now."

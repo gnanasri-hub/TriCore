@@ -81,14 +81,14 @@ class TestMinLengthGuard:
         answer = "x" * MIN_ANSWER_LENGTH
         mock_eval = _eval(is_vague=False)
         mock_response = MagicMock()
-        mock_response.choices[0].message.parsed = mock_eval
+        mock_response.choices[0].message.content = mock_eval.model_dump_json()
 
         mock_client = MagicMock()
-        mock_client.beta.chat.completions.parse.return_value = mock_response
+        mock_client.chat.completions.create.return_value = mock_response
         with patch("app.services.evaluator._get_client", return_value=mock_client):
             result = evaluate_answer("Q", answer, {"day": 7, "title": "T",
                                                     "objectives": [], "tools": []})
-        mock_client.beta.chat.completions.parse.assert_called_once()
+        mock_client.chat.completions.create.assert_called_once()
         assert result.is_vague is False
 
     def test_dict_context_serialised(self):
@@ -96,16 +96,17 @@ class TestMinLengthGuard:
         answer = "x" * MIN_ANSWER_LENGTH
         mock_eval = _eval()
         mock_response = MagicMock()
-        mock_response.choices[0].message.parsed = mock_eval
+        mock_response.choices[0].message.content = mock_eval.model_dump_json()
 
         mock_client = MagicMock()
-        mock_client.beta.chat.completions.parse.return_value = mock_response
+        mock_client.chat.completions.create.return_value = mock_response
         with patch("app.services.evaluator._get_client", return_value=mock_client):
             result = evaluate_answer(
                 "Q", answer,
                 {"day": 7, "title": "Embeddings", "objectives": ["obj1"], "tools": ["FAISS"]},
             )
         assert result is not None
+
 
 
 # ── Evaluation derived properties ─────────────────────────────────────────────
@@ -137,23 +138,23 @@ class TestDecideNextAction:
         for ev in [_eval(is_vague=True), _eval(is_incomplete=True), _eval(is_strong=True, depth=10)]:
             assert decide_next_action(ev, session) == "new_question"
 
-    # Rule 2: vague → follow_up
+    # Rule 2: vague → follow_up_clarify
     def test_vague_triggers_followup(self):
         session = _pending_session(is_pending=False)
         ev = _eval(is_vague=True)
-        assert decide_next_action(ev, session) == "follow_up"
+        assert decide_next_action(ev, session) == "follow_up_clarify"
 
-    # Rule 2: incomplete → follow_up
+    # Rule 2: incomplete → follow_up_clarify
     def test_incomplete_triggers_followup(self):
         session = _pending_session(is_pending=False)
         ev = _eval(is_incomplete=True)
-        assert decide_next_action(ev, session) == "follow_up"
+        assert decide_next_action(ev, session) == "follow_up_clarify"
 
-    # Rule 2: vague AND incomplete → follow_up
+    # Rule 2: vague AND incomplete → follow_up_clarify
     def test_vague_and_incomplete_triggers_followup(self):
         session = _pending_session(is_pending=False)
         ev = _eval(is_vague=True, is_incomplete=True)
-        assert decide_next_action(ev, session) == "follow_up"
+        assert decide_next_action(ev, session) == "follow_up_clarify"
 
     # Rule 3: strong + depth >= 8 → new_question
     def test_strong_high_depth_moves_on(self):
@@ -162,12 +163,12 @@ class TestDecideNextAction:
             ev = _eval(is_strong=True, depth=depth)
             assert decide_next_action(ev, session) == "new_question", f"depth={depth}"
 
-    # Rule 4: strong + depth < 8 → follow_up
+    # Rule 4: strong + depth < 8 → follow_up_escalate
     def test_strong_low_depth_probes_deeper(self):
         session = _pending_session(is_pending=False)
         for depth in [0, 4, 7]:
             ev = _eval(is_strong=True, depth=depth)
-            assert decide_next_action(ev, session) == "follow_up", f"depth={depth}"
+            assert decide_next_action(ev, session) == "follow_up_escalate", f"depth={depth}"
 
     # Rule 5: default (average answer, not vague/strong/incomplete) → new_question
     def test_average_answer_moves_on(self):
@@ -195,4 +196,4 @@ class TestDecideNextAction:
             interview_stage="INTERVIEWING",
         )
         ev = _eval(is_vague=True)
-        assert decide_next_action(ev, state) == "follow_up"
+        assert decide_next_action(ev, state) == "follow_up_clarify"
