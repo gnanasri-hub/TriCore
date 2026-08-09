@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Activity, TrendingUp, ShieldAlert, Award, ChevronRight, Sparkles } from 'lucide-react';
+import { Brain, Activity, TrendingUp, ShieldAlert, Award, ChevronRight, Sparkles, Loader2 } from 'lucide-react';
 
-// Sub-component to animate clarity score counting up from 0
+// Sub-component to animate clarity score counting up
 function AnimatedCounter({ value }) {
   const [displayVal, setDisplayVal] = useState(0);
 
@@ -14,7 +14,7 @@ function AnimatedCounter({ value }) {
       setDisplayVal(end);
       return;
     }
-    const duration = 800; // ms
+    const duration = 850; // ms
     const increment = Math.ceil(end / 30);
     const stepTime = duration / 30;
 
@@ -31,7 +31,7 @@ function AnimatedCounter({ value }) {
     return () => clearInterval(timer);
   }, [value]);
 
-  return <span>{value !== null ? `${displayVal}%` : 'Waiting...'}</span>;
+  return <span>{value !== null ? `${displayVal}%` : '0%'}</span>;
 }
 
 const getTechnicalSuggestions = (gaps) => {
@@ -62,7 +62,7 @@ const getTechnicalSuggestions = (gaps) => {
   });
 };
 
-export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
+export default function LiveFeedbackPanel({ evaluation, sessionStatus, isThinking }) {
   const accuracy = evaluation?.technical_accuracy ?? null;
   const depthScore = evaluation?.depth ?? null;
   const clarity = evaluation?.clarity ?? null;
@@ -71,12 +71,8 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
   const gaps = (evaluation?.missing_points || []).slice(0, 3);
   const suggestions = getTechnicalSuggestions(evaluation?.missing_points || []).slice(0, 3);
 
-  // Confidence assessment
   const confidence = accuracy === null ? 'Waiting...' : accuracy >= 8 ? 'High' : accuracy >= 6 ? 'Medium' : 'Low';
-  
-  // Depth assessment with 3 tiers: Strong, Moderate, Weak
   const depth = depthScore === null ? 'Waiting...' : depthScore >= 8 ? 'Strong' : depthScore >= 5 ? 'Moderate' : 'Weak';
-  
   const clarityScore = clarity === null ? null : clarity * 10;
 
   const questionCount = sessionStatus?.question_count || 1;
@@ -94,7 +90,6 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
     show: { opacity: 1, x: 0, transition: { type: "spring", stiffness: 180, damping: 15 } }
   };
 
-  // Card update flash pulsing glow
   const cardPulse = {
     initial: { scale: 1, borderColor: "rgba(255, 255, 255, 0.08)" },
     animate: { 
@@ -104,16 +99,67 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
     }
   };
 
+  // State 1: Shimmer Loading (Thinking State)
+  if (isThinking) {
+    return (
+      <div className="w-full flex flex-col gap-6 select-none h-full overflow-hidden">
+        <div className="flex items-center gap-2 pb-1 border-b border-zinc-900">
+          <Brain className="text-purple-400 shrink-0" size={18} />
+          <span className="font-bold text-xs tracking-widest uppercase font-display text-zinc-400">AI Adaptive Core</span>
+          <Loader2 className="ml-auto animate-spin text-purple-400" size={14} />
+        </div>
+
+        {/* Shimmer card */}
+        <div className="glass-card p-5 rounded-2xl border-zinc-850/80 space-y-4 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-purple-500/5 to-transparent -translate-x-full animate-[shimmer_2s_infinite]" />
+          <div className="h-3 w-28 bg-zinc-800 rounded animate-pulse" />
+          <div className="space-y-3">
+            <div className="h-9 bg-zinc-900/60 border border-zinc-850 rounded-xl animate-pulse" />
+            <div className="h-9 bg-zinc-900/60 border border-zinc-850 rounded-xl animate-pulse" />
+            <div className="h-9 bg-zinc-900/60 border border-zinc-850 rounded-xl animate-pulse" />
+          </div>
+        </div>
+
+        <div className="border border-dashed border-zinc-800/80 rounded-2xl p-6 text-center text-zinc-650 flex flex-col items-center justify-center gap-2 flex-1">
+          <Activity className="animate-pulse text-zinc-700" size={24} />
+          <span className="text-[11px] font-sans font-medium text-purple-400/70 tracking-tight">AI is analyzing response vectors...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // State 2: Idle (Before any evaluation is completed)
+  if (accuracy === null) {
+    return (
+      <div className="w-full flex flex-col gap-6 select-none h-full overflow-hidden">
+        <div className="flex items-center gap-2 pb-1 border-b border-zinc-900">
+          <Brain className="text-purple-400 shrink-0" size={18} />
+          <span className="font-bold text-xs tracking-widest uppercase font-display text-zinc-400">AI Adaptive Core</span>
+          <div className="ml-auto w-2 h-2 rounded-full bg-zinc-700" />
+        </div>
+
+        <div className="border border-dashed border-zinc-850 rounded-2xl p-6 text-center text-zinc-550 flex flex-col items-center justify-center gap-3 flex-1">
+          <Brain size={28} className="text-zinc-700 animate-pulse" />
+          <div>
+            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1 font-display">System Active</h3>
+            <p className="text-[11px] font-sans text-zinc-500 leading-relaxed max-w-[200px] mx-auto">
+              Evaluation metrics activate automatically when you submit responses.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // State 3: Evaluated (Full live data metrics panel)
   return (
     <div className="w-full flex flex-col gap-6 select-none h-full overflow-y-auto pr-1">
-      {/* ── Intelligence Header ── */}
       <div className="flex items-center gap-2 pb-1 border-b border-zinc-900">
         <Brain className="text-purple-400 shrink-0" size={18} />
         <span className="font-bold text-xs tracking-widest uppercase font-display text-zinc-400">AI Adaptive Core</span>
         <div className="ml-auto w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
       </div>
 
-      {/* ── AI Mood & Difficulty Indicators ── */}
       <div className="grid grid-cols-2 gap-4">
         <div className="glass-card p-4 rounded-xl border-zinc-800/80 flex flex-col gap-1.5">
           <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">AI Mood State</span>
@@ -132,7 +178,6 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
         </div>
       </div>
 
-      {/* ── Live Adaptive Signals (Glows & Counts on update) ── */}
       <motion.div 
         key={accuracy}
         variants={cardPulse}
@@ -163,74 +208,66 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
         </div>
       </motion.div>
 
-      {/* ── Real-Time Evaluation Feedback ── */}
       <AnimatePresence mode="wait">
-        {accuracy !== null ? (
-          <motion.div 
-            key={questionCount}
-            variants={listVariants}
-            initial="hidden"
-            animate="show"
-            exit="hidden"
-            className="space-y-5"
-          >
-            {/* Strengths */}
-            {strengths.length > 0 && (
-              <motion.div variants={itemVariants} className="glass-card p-4.5 rounded-xl border-emerald-500/10 shadow-[0_0_15px_rgba(16,185,129,0.02)]">
-                <span className="text-[10px] text-emerald-400 font-bold tracking-wider uppercase block mb-3 flex items-center gap-1.5">
-                  <Award size={12} className="text-emerald-400" /> Live Strengths
-                </span>
-                <div className="space-y-2">
-                  {strengths.map((str, idx) => (
-                    <div key={idx} className="flex gap-2 text-xs text-zinc-300 items-start leading-relaxed pl-0.5">
-                      <ChevronRight size={13} className="text-emerald-500 shrink-0 mt-0.5" />
-                      <span>{str}</span>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
+        <motion.div 
+          key={questionCount}
+          variants={listVariants}
+          initial="hidden"
+          animate="show"
+          exit="hidden"
+          className="space-y-5"
+        >
+          {/* Strengths */}
+          {strengths.length > 0 && (
+            <motion.div variants={itemVariants} className="glass-card p-4.5 rounded-xl border-emerald-500/10 shadow-[0_0_15px_rgba(16,185,129,0.02)]">
+              <span className="text-[10px] text-emerald-400 font-bold tracking-wider uppercase block mb-3 flex items-center gap-1.5">
+                <Award size={12} className="text-emerald-400" /> Live Strengths
+              </span>
+              <div className="space-y-2">
+                {strengths.map((str, idx) => (
+                  <div key={idx} className="flex gap-2 text-xs text-zinc-300 items-start leading-relaxed pl-0.5">
+                    <ChevronRight size={13} className="text-emerald-500 shrink-0 mt-0.5" />
+                    <span>{str}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
 
-            {/* Gaps */}
-            {gaps.length > 0 && (
-              <motion.div variants={itemVariants} className="glass-card p-4.5 rounded-xl border-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.02)]">
-                <span className="text-[10px] text-red-400 font-bold tracking-wider uppercase block mb-3 flex items-center gap-1.5">
-                  <ShieldAlert size={12} className="text-red-400" /> Knowledge Gaps
-                </span>
-                <div className="space-y-2">
-                  {gaps.map((gap, idx) => (
-                    <div key={idx} className="flex gap-2 text-xs text-zinc-300 items-start leading-relaxed pl-0.5">
-                      <ChevronRight size={13} className="text-red-400 shrink-0 mt-0.5" />
-                      <span>{gap}</span>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
+          {/* Gaps */}
+          {gaps.length > 0 && (
+            <motion.div variants={itemVariants} className="glass-card p-4.5 rounded-xl border-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.02)]">
+              <span className="text-[10px] text-red-400 font-bold tracking-wider uppercase block mb-3 flex items-center gap-1.5">
+                <ShieldAlert size={12} className="text-red-400" /> Knowledge Gaps
+              </span>
+              <div className="space-y-2">
+                {gaps.map((gap, idx) => (
+                  <div key={idx} className="flex gap-2 text-xs text-zinc-300 items-start leading-relaxed pl-0.5">
+                    <ChevronRight size={13} className="text-red-400 shrink-0 mt-0.5" />
+                    <span>{gap}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
 
-            {/* Suggestions */}
-            {suggestions.length > 0 && (
-              <motion.div variants={itemVariants} className="glass-card p-4.5 rounded-xl border-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.02)]">
-                <span className="text-[10px] text-blue-400 font-bold tracking-wider uppercase block mb-3 flex items-center gap-1.5">
-                  <Sparkles size={12} className="text-blue-400 animate-pulse" /> Focus Suggestions
-                </span>
-                <div className="space-y-2">
-                  {suggestions.map((sug, idx) => (
-                    <div key={idx} className="flex gap-2 text-xs text-zinc-300 items-start leading-relaxed pl-0.5">
-                      <ChevronRight size={13} className="text-blue-400 shrink-0 mt-0.5" />
-                      <span>{sug}</span>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </motion.div>
-        ) : (
-          <div className="flex-1 border border-dashed border-zinc-800/80 rounded-2xl flex flex-col items-center justify-center p-6 text-center text-zinc-650 gap-2">
-            <Activity className="animate-pulse text-zinc-700" size={24} />
-            <p className="text-[11px] font-sans font-medium tracking-tight text-zinc-500">Waiting for response evaluation...</p>
-          </div>
-        )}
+          {/* Suggestions */}
+          {suggestions.length > 0 && (
+            <motion.div variants={itemVariants} className="glass-card p-4.5 rounded-xl border-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.02)]">
+              <span className="text-[10px] text-blue-400 font-bold tracking-wider uppercase block mb-3 flex items-center gap-1.5">
+                <Sparkles size={12} className="text-blue-400 animate-pulse" /> Focus Suggestions
+              </span>
+              <div className="space-y-2">
+                {suggestions.map((sug, idx) => (
+                  <div key={idx} className="flex gap-2 text-xs text-zinc-300 items-start leading-relaxed pl-0.5">
+                    <ChevronRight size={13} className="text-blue-400 shrink-0 mt-0.5" />
+                    <span>{sug}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </motion.div>
       </AnimatePresence>
     </div>
   );

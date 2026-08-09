@@ -31,11 +31,12 @@ const TOPICS = {
   31: "Capstone Project",
 };
 
-export default function Chat({ messages, isThinking, sessionStatus, isFocusMode, setIsFocusMode }) {
+export default function Chat({ messages, isThinking, sessionStatus, isFocusMode, setIsFocusMode, detectedDays = [] }) {
   const scrollRef = useRef(null);
   
   const questionCount = sessionStatus?.question_count || 1;
   const coveredDays = sessionStatus?.covered_days || [];
+  const allCoveredDays = Array.from(new Set([...coveredDays, ...detectedDays]));
 
   useEffect(() => {
     if (!isFocusMode) {
@@ -43,27 +44,16 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
     }
   }, [messages, isThinking, isFocusMode]);
 
-  // Non-linear progress percent helper
   const progressPercent = Math.min((questionCount / 8) * 100, 100);
 
   const listVariants = {
     hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.08
-      }
-    }
+    show: { opacity: 1, transition: { staggerChildren: 0.05 } }
   };
 
   const chipVariants = {
-    hidden: { opacity: 0, y: 12, scale: 0.95 },
-    show: { 
-      opacity: 1, 
-      y: 0, 
-      scale: 1,
-      transition: { type: "spring", stiffness: 200, damping: 15 } 
-    }
+    hidden: { opacity: 0, y: 8, scale: 0.95 },
+    show: { opacity: 1, y: 0, scale: 1, transition: { type: "spring", stiffness: 220, damping: 15 } }
   };
 
   const lastMsg = messages[messages.length - 1];
@@ -85,61 +75,57 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden w-full max-w-[800px] mx-auto px-4 relative">
+    <div className="flex-1 flex flex-col h-full overflow-hidden w-full max-w-[800px] mx-auto px-4 relative mt-1 min-h-[500px]">
       
-      {/* Top Header Card: Smart Adaptive Progress */}
+      {/* Top Header Card: Smart Adaptive Progress (PADDING REDUCED & COMPACT LAYOUT) */}
       <motion.div 
-        initial={{ opacity: 0, y: -15 }}
+        initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-card p-5 rounded-2xl border-purple-500/10 mb-6 flex flex-col gap-4 relative overflow-hidden z-10"
+        className="glass-card p-3.5 rounded-xl border-purple-500/10 mb-4 flex flex-col gap-2.5 relative overflow-hidden z-10"
       >
-        <div className="absolute top-0 left-0 h-[2px] bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 w-full" />
+        <div className="absolute top-0 left-0 h-[1.5px] bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 w-full" />
         
-        <div className="flex justify-between items-end">
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-center gap-2 text-zinc-200">
-              <Sparkles size={14} className="text-purple-400 animate-pulse shrink-0" />
-              <span className="font-semibold text-sm tracking-tight font-display">Adaptive Interview Progress</span>
-            </div>
-            <span className="text-[10px] text-zinc-500 font-medium">
-              Adapting based on your responses
-            </span>
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-1.5 text-zinc-300">
+            <Sparkles size={12} className="text-purple-400 animate-pulse shrink-0" />
+            <span className="font-bold text-xs tracking-tight font-display">Adaptive Progress</span>
+            <span className="text-[10px] text-zinc-550 hidden sm:inline">• dynamic scaling</span>
           </div>
-          <span className="text-purple-400 font-mono font-bold text-xs bg-purple-950/30 px-2 py-0.5 rounded border border-purple-500/10 animate-pulse">
+          <span className="text-purple-400 font-mono font-extrabold text-[9px] bg-purple-950/20 px-1.5 py-0.5 rounded border border-purple-500/10 animate-pulse">
             Q{questionCount} / 8+
           </span>
         </div>
 
-        <div className="w-full h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900 relative">
+        {/* Progress Bar (THINNER) */}
+        <div className="w-full h-1 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900/60 relative">
           <motion.div 
             initial={{ width: 0 }}
             animate={{ width: `${progressPercent}%` }}
             transition={{ duration: 0.8, ease: "easeInOut" }}
-            className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 rounded-full relative shadow-[0_0_15px_rgba(168,85,247,0.6)]"
+            className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 rounded-full relative shadow-[0_0_10px_rgba(168,85,247,0.4)]"
           >
             <div className="absolute top-0 right-0 bottom-0 left-0 bg-white/20 animate-pulse" />
           </motion.div>
         </div>
 
-        {coveredDays.length > 0 && (
-          <div className="flex flex-col gap-2 mt-1 border-t border-zinc-900/60 pt-3">
-            <span className="text-[9px] text-zinc-550 uppercase tracking-widest font-bold flex items-center gap-1">
-              <Layers size={10} />
-              Covered Core Topics
+        {/* Dynamic chips (COMPACT SIZES & SPACING) */}
+        {allCoveredDays.length > 0 && (
+          <div className="flex items-center gap-2 pt-1 border-t border-zinc-900/50 flex-wrap">
+            <span className="text-[8px] text-zinc-550 uppercase tracking-widest font-extrabold shrink-0">
+              Domains:
             </span>
             <motion.div 
               variants={listVariants}
               initial="hidden"
               animate="show"
-              className="flex flex-wrap gap-1.5"
+              className="flex flex-wrap gap-1"
             >
-              {coveredDays.map((dayNum) => (
+              {allCoveredDays.map((dayNum) => (
                 <motion.span
                   key={dayNum}
                   variants={chipVariants}
-                  className="text-[11px] font-medium bg-purple-950/20 border border-purple-500/20 text-purple-300 px-2.5 py-0.5 rounded-md flex items-center gap-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.2)] hover:border-purple-500/40 transition-all duration-200 hover:scale-105"
+                  className="text-[9px] font-bold bg-purple-950/15 border border-purple-500/10 text-purple-300/80 px-2 py-0.5 rounded shadow-[0_1px_5px_rgba(0,0,0,0.15)] hover:border-purple-500/35 transition-all duration-150"
                 >
-                  <BookOpen size={10} className="opacity-70" />
                   {TOPICS[dayNum] || `Day ${dayNum}`}
                 </motion.span>
               ))}
@@ -149,10 +135,10 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
       </motion.div>
 
       {/* Message Scroll Container */}
-      <div className="flex-1 overflow-y-auto px-1 py-4 space-y-4 rounded-2xl scroll-smooth">
+      <div className="flex-1 overflow-y-auto px-1 py-2 space-y-4 rounded-2xl scroll-smooth">
         <div className="flex flex-col min-h-full justify-end">
           {messages.length === 0 && !isThinking && (
-            <div className="text-zinc-550 text-xs font-mono text-center py-12 animate-pulse uppercase tracking-wider">
+            <div className="text-zinc-600 text-[10px] font-mono text-center py-12 animate-pulse uppercase tracking-widest">
               AI is preparing your first question...
             </div>
           )}
@@ -230,12 +216,19 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
                   AI Question • Adaptive Evaluation
                 </div>
                 
-                <button
-                  onClick={() => setIsFocusMode(false)}
-                  className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-[10px] uppercase font-bold text-zinc-400 hover:text-white rounded-lg cursor-pointer transition-colors"
-                >
-                  Dismiss Focus Mode [Esc]
-                </button>
+                {/* Badges */}
+                <div className="flex gap-2">
+                  <span className="text-[10px] font-mono font-bold bg-blue-950/30 text-blue-400 px-2 py-1 rounded-lg border border-blue-500/20 uppercase">
+                    {lastMsg.domain || "AI Engineering"}
+                  </span>
+                  <span className={`text-[10px] font-mono font-bold px-2 py-1 rounded-lg border uppercase ${
+                    lastMsg.difficulty === 'Hard' 
+                      ? 'bg-pink-950/30 text-pink-400 border-pink-500/20' 
+                      : 'bg-purple-950/30 text-purple-400 border-purple-500/20'
+                  }`}>
+                    {lastMsg.difficulty || "Standard"}
+                  </span>
+                </div>
               </div>
 
               {/* Large, relaxed line-spaced typography centered reading layout */}

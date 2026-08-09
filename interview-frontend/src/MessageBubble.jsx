@@ -95,6 +95,21 @@ export default function MessageBubble({ message }) {
                 ⚡ AI is probing deeper
               </div>
             )}
+
+            {isBot && message.content && (
+              <div className="flex gap-2 mb-3.5 select-none">
+                <span className="text-[10px] font-mono font-bold bg-blue-950/40 text-blue-400 px-2 py-0.5 rounded border border-blue-500/15 uppercase tracking-wide">
+                  {message.domain || "AI Engineering"}
+                </span>
+                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border uppercase tracking-wide ${
+                  message.difficulty === 'Hard' 
+                    ? 'bg-pink-955/35 text-pink-400 border-pink-500/15' 
+                    : 'bg-purple-955/35 text-purple-400 border-purple-500/15'
+                }`}>
+                  {message.difficulty || "Standard"}
+                </span>
+              </div>
+            )}
             
             {/* Main content - whitespace-pre-wrap */}
             <p className="whitespace-pre-wrap text-zinc-200 pr-4">
