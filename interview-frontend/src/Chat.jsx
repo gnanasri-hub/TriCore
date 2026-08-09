@@ -43,7 +43,7 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
     }
   }, [messages, isThinking, isFocusMode]);
 
-  // Calculate non-linear progress step
+  // Non-linear progress percent helper
   const progressPercent = Math.min((questionCount / 8) * 100, 100);
 
   const listVariants = {
@@ -69,6 +69,21 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
   const lastMsg = messages[messages.length - 1];
   const showFocusOverlay = isFocusMode && lastMsg && lastMsg.role === 'assistant' && !isThinking;
 
+  const renderFormattedContent = (text) => {
+    if (!text) return '';
+    const parts = text.split(/(\*\*.*?\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return (
+          <strong key={i} className="font-extrabold text-white bg-purple-500/10 px-1 py-0.5 rounded border border-purple-500/20">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      return part;
+    });
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden w-full max-w-[800px] mx-auto px-4 relative">
       
@@ -80,7 +95,6 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
       >
         <div className="absolute top-0 left-0 h-[2px] bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 w-full" />
         
-        {/* Progress Bar Header */}
         <div className="flex justify-between items-end">
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-2 text-zinc-200">
@@ -96,7 +110,6 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
           </span>
         </div>
 
-        {/* Progress Bar Line with soft neon glow */}
         <div className="w-full h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900 relative">
           <motion.div 
             initial={{ width: 0 }}
@@ -108,10 +121,9 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
           </motion.div>
         </div>
 
-        {/* Domain Tracking chips */}
         {coveredDays.length > 0 && (
           <div className="flex flex-col gap-2 mt-1 border-t border-zinc-900/60 pt-3">
-            <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-1">
+            <span className="text-[9px] text-zinc-550 uppercase tracking-widest font-bold flex items-center gap-1">
               <Layers size={10} />
               Covered Core Topics
             </span>
@@ -139,6 +151,12 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
       {/* Message Scroll Container */}
       <div className="flex-1 overflow-y-auto px-1 py-4 space-y-4 rounded-2xl scroll-smooth">
         <div className="flex flex-col min-h-full justify-end">
+          {messages.length === 0 && !isThinking && (
+            <div className="text-zinc-550 text-xs font-mono text-center py-12 animate-pulse uppercase tracking-wider">
+              AI is preparing your first question...
+            </div>
+          )}
+
           {messages.map((msg, index) => (
             <MessageBubble 
               key={msg.id || index} 
@@ -165,10 +183,8 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
                   transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
                   className="p-4 rounded-2xl glass-card border-purple-500/10 text-zinc-400 rounded-tl-none flex items-center gap-4.5 shadow-[0_0_15px_rgba(168,85,247,0.05)] relative overflow-hidden"
                 >
-                  {/* Subtle Shimmer background */}
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-purple-500/5 to-transparent -translate-x-full animate-[shimmer_2s_infinite]" />
                   
-                  {/* Neon Jumping Waveform */}
                   <div className="flex items-center gap-1.5 h-4.5 shrink-0 px-1">
                     <span className="w-1 h-3.5 bg-gradient-to-t from-purple-500 to-pink-500 rounded-full origin-bottom animate-[wave_1.2s_ease-in-out_infinite_0ms]" />
                     <span className="w-1 h-5 bg-gradient-to-t from-purple-500 to-pink-500 rounded-full origin-bottom animate-[wave_1.2s_ease-in-out_infinite_150ms]" />
@@ -199,40 +215,42 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/75 backdrop-blur-md flex flex-col items-center justify-center z-40 p-6 pointer-events-auto"
+            className="fixed inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-45 p-6 pointer-events-auto"
           >
             <motion.div 
-              initial={{ scale: 1.0, opacity: 0, y: 20 }}
-              animate={{ scale: 1.02, opacity: 1, y: 0 }}
-              exit={{ scale: 1.0, opacity: 0, y: 20 }}
+              initial={{ scale: 0.98, opacity: 0, y: 20 }}
+              animate={{ scale: 1.0, opacity: 1, y: 0 }}
+              exit={{ scale: 0.98, opacity: 0, y: 20 }}
               transition={{ type: "spring", stiffness: 220, damping: 20 }}
-              className="glass-card max-w-[800px] w-full rounded-3xl p-8 border-purple-500/20 shadow-[0_0_60px_rgba(168,85,247,0.12)] relative"
+              className="glass-card max-w-3xl w-full rounded-3xl p-8 border-purple-500/20 shadow-[0_0_60px_rgba(168,85,247,0.12)] relative"
             >
               <div className="flex justify-between items-center mb-6">
-                <div className="inline-flex items-center gap-2 bg-purple-500/10 border border-purple-500/20 text-purple-400 px-3 py-1 rounded-full text-xs font-semibold tracking-wider uppercase font-display shadow-[0_0_10px_rgba(168,85,247,0.15)]">
-                  <Sparkles size={12} className="animate-pulse" />
-                  Active Focus Question
+                <div className="inline-flex items-center gap-2 bg-purple-500/10 border border-purple-500/20 text-purple-400 px-3.5 py-1 rounded-full text-xs font-semibold tracking-wider uppercase font-display shadow-[0_0_10px_rgba(168,85,247,0.15)]">
+                  <Sparkles size={12} className="animate-pulse text-purple-400" />
+                  AI Question • Adaptive Evaluation
                 </div>
                 
                 <button
                   onClick={() => setIsFocusMode(false)}
-                  className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-[10px] uppercase font-bold text-zinc-400 hover:text-white rounded-lg cursor-pointer"
+                  className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-[10px] uppercase font-bold text-zinc-400 hover:text-white rounded-lg cursor-pointer transition-colors"
                 >
                   Dismiss Focus Mode [Esc]
                 </button>
               </div>
 
               {/* Large, relaxed line-spaced typography centered reading layout */}
-              <div className="text-zinc-100 text-2xl font-medium font-sans leading-relaxed text-left max-h-[50vh] overflow-y-auto pr-2">
-                <p className="whitespace-pre-wrap leading-loose text-zinc-200">
-                  {lastMsg.content}
+              <div className="text-zinc-150 text-2xl font-medium font-sans leading-relaxed text-left max-h-[50vh] overflow-y-auto pr-2">
+                <p className="whitespace-pre-wrap leading-loose text-zinc-200 pr-2">
+                  {renderFormattedContent(lastMsg.content)}
+                  {lastMsg.content && !lastMsg.content.endsWith('?') && (
+                    <span className="animate-pulse bg-purple-500 w-1.5 h-4 ml-1 inline-block select-none font-bold">▋</span>
+                  )}
                 </p>
               </div>
 
-              {/* Responsive indicator badge */}
-              <div className="mt-8 pt-4 border-t border-zinc-900/60 flex items-center gap-3 text-xs text-zinc-500 font-medium font-sans">
+              <div className="mt-8 pt-4 border-t border-zinc-900/60 flex items-center gap-3 text-xs text-zinc-550 font-medium font-sans">
                 <Keyboard size={16} className="text-purple-400 animate-pulse" />
-                <span className="animate-pulse text-zinc-400">Start typing your answer below to resume context...</span>
+                <span className="animate-pulse text-zinc-450">Start typing your answer below to exit focus mode...</span>
               </div>
             </motion.div>
           </motion.div>

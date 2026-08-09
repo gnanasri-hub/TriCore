@@ -1,8 +1,39 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Activity, TrendingUp, ShieldAlert, Award, ChevronRight, Sparkles, BookOpen } from 'lucide-react';
+import { Brain, Activity, TrendingUp, ShieldAlert, Award, ChevronRight, Sparkles } from 'lucide-react';
 
-// Dynamic mapper translating knowledge gaps into actionable, professional engineering suggestions
+// Sub-component to animate clarity score counting up from 0
+function AnimatedCounter({ value }) {
+  const [displayVal, setDisplayVal] = useState(0);
+
+  useEffect(() => {
+    if (value === null) return;
+    let start = 0;
+    const end = value;
+    if (start === end) {
+      setDisplayVal(end);
+      return;
+    }
+    const duration = 800; // ms
+    const increment = Math.ceil(end / 30);
+    const stepTime = duration / 30;
+
+    const timer = setInterval(() => {
+      start += increment;
+      if (start >= end) {
+        setDisplayVal(end);
+        clearInterval(timer);
+      } else {
+        setDisplayVal(start);
+      }
+    }, stepTime);
+
+    return () => clearInterval(timer);
+  }, [value]);
+
+  return <span>{value !== null ? `${displayVal}%` : 'Waiting...'}</span>;
+}
+
 const getTechnicalSuggestions = (gaps) => {
   if (!gaps || gaps.length === 0) return [];
   
@@ -26,7 +57,6 @@ const getTechnicalSuggestions = (gaps) => {
     if (text.includes("api") || text.includes("fastapi") || text.includes("http")) {
       return "Standardize request schemas using Pydantic and define robust route models.";
     }
-    // Fallback dynamic suggestion
     const keywords = gap.split(' ').slice(0, 3).join(' ');
     return `Deepen competency in related cohort objectives; focus on resolving ${keywords}.`;
   });
@@ -37,13 +67,16 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
   const depthScore = evaluation?.depth ?? null;
   const clarity = evaluation?.clarity ?? null;
   
-  // Slice to max 3 points per category
   const strengths = (evaluation?.strengths || []).slice(0, 3);
   const gaps = (evaluation?.missing_points || []).slice(0, 3);
   const suggestions = getTechnicalSuggestions(evaluation?.missing_points || []).slice(0, 3);
 
+  // Confidence assessment
   const confidence = accuracy === null ? 'Waiting...' : accuracy >= 8 ? 'High' : accuracy >= 6 ? 'Medium' : 'Low';
-  const depth = depthScore === null ? 'Waiting...' : depthScore >= 7 ? 'Strong' : 'Weak';
+  
+  // Depth assessment with 3 tiers: Strong, Moderate, Weak
+  const depth = depthScore === null ? 'Waiting...' : depthScore >= 8 ? 'Strong' : depthScore >= 5 ? 'Moderate' : 'Weak';
+  
   const clarityScore = clarity === null ? null : clarity * 10;
 
   const questionCount = sessionStatus?.question_count || 1;
@@ -51,21 +84,23 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
   const mood = questionCount <= 1 ? 'Neutral' : isPendingFollowUp ? 'Curious' : 'Challenging';
   const difficulty = accuracy !== null && accuracy >= 8 ? 'Hard' : 'Standard';
 
-  // Stagger animations sliding from right
   const listVariants = {
     hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.08, delayChildren: 0.1 }
-    }
+    show: { opacity: 1, transition: { staggerChildren: 0.08, delayChildren: 0.1 } }
   };
 
   const itemVariants = {
     hidden: { opacity: 0, x: 20 },
-    show: { 
-      opacity: 1, 
-      x: 0, 
-      transition: { type: "spring", stiffness: 180, damping: 15 } 
+    show: { opacity: 1, x: 0, transition: { type: "spring", stiffness: 180, damping: 15 } }
+  };
+
+  // Card update flash pulsing glow
+  const cardPulse = {
+    initial: { scale: 1, borderColor: "rgba(255, 255, 255, 0.08)" },
+    animate: { 
+      scale: [1, 1.02, 1],
+      borderColor: ["rgba(255, 255, 255, 0.08)", "rgba(168, 85, 247, 0.4)", "rgba(255, 255, 255, 0.08)"],
+      transition: { duration: 0.5, ease: "easeInOut" }
     }
   };
 
@@ -83,7 +118,7 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
         <div className="glass-card p-4 rounded-xl border-zinc-800/80 flex flex-col gap-1.5">
           <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">AI Mood State</span>
           <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${mood === 'Challenging' ? 'bg-red-500' : mood === 'Curious' ? 'bg-amber-500' : 'bg-purple-500'}`} />
+            <span className={`w-2 h-2 rounded-full ${mood === 'Challenging' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : mood === 'Curious' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]'}`} />
             <span className="font-display font-extrabold text-[14px] text-zinc-200">{mood}</span>
           </div>
         </div>
@@ -97,10 +132,16 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
         </div>
       </div>
 
-      {/* ── Live Adaptive Signals ── */}
-      <div className="glass-card p-5 rounded-2xl border-zinc-850/80 space-y-4">
-        <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-extrabold block">Live Feedback Signals</span>
-        <div className="space-y-3">
+      {/* ── Live Adaptive Signals (Glows & Counts on update) ── */}
+      <motion.div 
+        key={accuracy}
+        variants={cardPulse}
+        initial="initial"
+        animate="animate"
+        className="glass-card p-5 rounded-2xl space-y-4"
+      >
+        <span className="text-[9px] text-zinc-550 uppercase tracking-widest font-extrabold block">Live Feedback Signals</span>
+        <div className="space-y-3 font-sans">
           <div className="flex justify-between items-center bg-zinc-950/40 p-2.5 rounded-xl border border-zinc-900/60">
             <span className="text-xs text-zinc-400 font-medium">Confidence Rating</span>
             <span className={`text-xs font-bold font-mono px-2 py-0.5 rounded ${
@@ -110,15 +151,17 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
           <div className="flex justify-between items-center bg-zinc-950/40 p-2.5 rounded-xl border border-zinc-900/60">
             <span className="text-xs text-zinc-400 font-medium">Evaluation Depth</span>
             <span className={`text-xs font-bold font-mono px-2 py-0.5 rounded ${
-              depth === 'Strong' ? 'bg-purple-950/30 text-purple-400 border border-purple-500/10' : 'bg-zinc-850 text-zinc-400'
+              depth === 'Strong' ? 'bg-purple-950/30 text-purple-400 border border-purple-500/10' : depth === 'Moderate' ? 'bg-amber-950/20 text-amber-400' : 'bg-zinc-850 text-zinc-500'
             }`}>{depth}</span>
           </div>
           <div className="flex justify-between items-center bg-zinc-950/40 p-2.5 rounded-xl border border-zinc-900/60">
             <span className="text-xs text-zinc-400 font-medium">Clarity Score</span>
-            <span className="text-xs font-bold font-mono text-zinc-200">{clarityScore !== null ? `${clarityScore}%` : 'Waiting...'}</span>
+            <span className="text-xs font-bold font-mono text-zinc-200">
+              <AnimatedCounter value={clarityScore} />
+            </span>
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* ── Real-Time Evaluation Feedback ── */}
       <AnimatePresence mode="wait">
@@ -131,7 +174,7 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
             exit="hidden"
             className="space-y-5"
           >
-            {/* Strengths List (Green) */}
+            {/* Strengths */}
             {strengths.length > 0 && (
               <motion.div variants={itemVariants} className="glass-card p-4.5 rounded-xl border-emerald-500/10 shadow-[0_0_15px_rgba(16,185,129,0.02)]">
                 <span className="text-[10px] text-emerald-400 font-bold tracking-wider uppercase block mb-3 flex items-center gap-1.5">
@@ -148,7 +191,7 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
               </motion.div>
             )}
 
-            {/* Gaps List (Red) */}
+            {/* Gaps */}
             {gaps.length > 0 && (
               <motion.div variants={itemVariants} className="glass-card p-4.5 rounded-xl border-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.02)]">
                 <span className="text-[10px] text-red-400 font-bold tracking-wider uppercase block mb-3 flex items-center gap-1.5">
@@ -165,7 +208,7 @@ export default function LiveFeedbackPanel({ evaluation, sessionStatus }) {
               </motion.div>
             )}
 
-            {/* Suggestions List (Blue) */}
+            {/* Suggestions */}
             {suggestions.length > 0 && (
               <motion.div variants={itemVariants} className="glass-card p-4.5 rounded-xl border-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.02)]">
                 <span className="text-[10px] text-blue-400 font-bold tracking-wider uppercase block mb-3 flex items-center gap-1.5">

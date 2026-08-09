@@ -1,12 +1,32 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, User, Zap, Maximize2, X, AlertCircle } from 'lucide-react';
+import { Bot, User, Zap, Maximize2, X, AlertCircle, CheckCircle2, ChevronRight, Activity, ArrowUpRight } from 'lucide-react';
+
+const getRecommendationTip = (gapText) => {
+  if (!gapText) return '';
+  const text = gapText.toLowerCase();
+  if (text.includes("sql") || text.includes("database")) {
+    return "Study transaction isolations and query optimize patterns.";
+  }
+  if (text.includes("rag") || text.includes("vector")) {
+    return "Check chunk boundaries and study dense vs sparse vector search models.";
+  }
+  if (text.includes("agent") || text.includes("mcp")) {
+    return "Review state orchestrations and Model Context Protocol schema definitions.";
+  }
+  if (text.includes("cache") || text.includes("redis")) {
+    return "Study cache eviction keys and Redis serialization protocols.";
+  }
+  if (text.includes("api") || text.includes("fastapi")) {
+    return "Define responses using explicit Pydantic schemas.";
+  }
+  return "Deepen understanding of core topic objective boundaries.";
+};
 
 export default function MessageBubble({ message }) {
   const isBot = message.role === 'assistant';
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Clamp long messages (e.g. over 280 characters) until user clicks "Continue reading"
   const isLong = isBot && message.content && message.content.length > 280;
   const [isClamped, setIsClamped] = useState(isLong);
 
@@ -72,12 +92,17 @@ export default function MessageBubble({ message }) {
             {message.isFollowUp && isBot && (
               <div className="absolute -top-3.5 left-3 bg-gradient-to-r from-purple-600 to-pink-650 text-[9px] uppercase font-extrabold tracking-widest text-white px-2.5 py-1 rounded-full flex items-center gap-1 border border-purple-400/20 shadow-[0_0_15px_rgba(168,85,247,0.3)] z-10">
                 <Zap size={10} className="fill-white animate-pulse" />
-                ⚡ Follow-up question
+                ⚡ AI is probing deeper
               </div>
             )}
             
             {/* Main content - whitespace-pre-wrap */}
-            <p className="whitespace-pre-wrap text-zinc-200 pr-4">{renderFormattedContent(message.content)}</p>
+            <p className="whitespace-pre-wrap text-zinc-200 pr-4">
+              {renderFormattedContent(message.content)}
+              {isBot && message.content && message.content.length > 0 && !message.content.endsWith('?') && (
+                <span className="animate-pulse bg-purple-500 w-1.5 h-4 ml-1 inline-block select-none font-bold">▋</span>
+              )}
+            </p>
 
             {/* Expand modal trigger button */}
             {isBot && message.content && !isClamped && (
@@ -98,11 +123,55 @@ export default function MessageBubble({ message }) {
                     e.stopPropagation();
                     setIsClamped(false);
                   }}
-                  className="text-purple-400 hover:text-purple-300 font-bold text-[11px] uppercase tracking-wider flex items-center gap-1 cursor-pointer bg-zinc-900 px-3.5 py-1.5 rounded-full border border-purple-500/20 shadow-[0_4px_12px_rgba(0,0,0,0.5)] transition-all hover:scale-105"
+                  className="text-purple-400 hover:text-purple-300 font-bold text-[11px] uppercase tracking-wider flex items-center gap-1 cursor-pointer bg-zinc-900 px-3.5 py-1.5 rounded-full border border-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.3)] transition-all hover:scale-105"
                 >
                   Continue reading ↓
                 </button>
               </div>
+            )}
+
+            {/* Real-time evaluation breakdown */}
+            {isBot && message.evaluation && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="mt-5 pt-4 border-t border-zinc-900 flex flex-col gap-3.5"
+              >
+                <div className="flex items-center gap-1.5 text-[9px] text-zinc-500 font-extrabold uppercase tracking-widest">
+                  <Activity size={12} className="text-purple-400" />
+                  Response Evaluation Matrix
+                </div>
+                <div className="grid grid-cols-1 gap-2 text-xs font-sans">
+                  {message.evaluation.strengths?.[0] && (
+                    <div className="flex gap-2 items-start text-emerald-400 bg-emerald-950/20 border border-emerald-500/10 px-3.5 py-2.5 rounded-xl">
+                      <CheckCircle2 size={14} className="shrink-0 text-emerald-400 mt-0.5" />
+                      <div>
+                        <span className="font-extrabold block text-[10px] uppercase tracking-wider text-emerald-500 mb-0.5">Strength Detected</span>
+                        <span className="text-zinc-300 leading-relaxed">{message.evaluation.strengths[0]}</span>
+                      </div>
+                    </div>
+                  )}
+                  {message.evaluation.missing_points?.[0] && (
+                    <div className="flex gap-2 items-start text-red-400 bg-red-950/20 border border-red-500/10 px-3.5 py-2.5 rounded-xl">
+                      <AlertCircle size={14} className="shrink-0 text-red-400 mt-0.5" />
+                      <div>
+                        <span className="font-extrabold block text-[10px] uppercase tracking-wider text-red-500 mb-0.5">Knowledge Gap</span>
+                        <span className="text-zinc-300 leading-relaxed">{message.evaluation.missing_points[0]}</span>
+                      </div>
+                    </div>
+                  )}
+                  {message.evaluation.missing_points?.[0] && (
+                    <div className="flex gap-2 items-start text-blue-400 bg-blue-950/20 border border-blue-500/10 px-3.5 py-2.5 rounded-xl">
+                      <ArrowUpRight size={14} className="shrink-0 text-blue-400 mt-0.5" />
+                      <div>
+                        <span className="font-extrabold block text-[10px] uppercase tracking-wider text-blue-400 mb-0.5">Calibration Suggestion</span>
+                        <span className="text-zinc-300 leading-relaxed">{getRecommendationTip(message.evaluation.missing_points[0])}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
             )}
           </div>
         </div>
