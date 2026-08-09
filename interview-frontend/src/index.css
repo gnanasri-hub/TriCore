@@ -78,6 +78,24 @@ body {
   width: 200%;
   height: 200%;
   background: transparent url('data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMjAwIDIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZmlsdGVyIGlkPSJub2lzZUZpbHRlciI+PGZlVHVyYnVsZW5jZSB0eXBlPSJmcmFjdGFsTm9pc2UiIGJhc2VGcmVxdWVuY3k9IjAuNjUiIG51bU9jdGF2ZXM9IjMiIHN0aXRjaFRpbGVzPSJzdGl0Y2giLz48L2ZpbHRlcj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWx0ZXI9InVybCgjbm9pc2VGaWx0ZXIpIiBvcGFjaXR5PSIwLjAxNSIvPjwvc3ZnPg==') repeat;
-  z-index: 9999;
+  z-index: 9998;
   pointer-events: none;
+}
+
+.chat-input {
+  position: relative !important;
+  z-index: 9999 !important;
+}
+
+.focus-overlay {
+  pointer-events: none !important;
+}
+
+.focus-overlay * {
+  pointer-events: auto !important;
+}
+
+/* Debug Pointer Safety check */
+* {
+  pointer-events: auto !important;
 }

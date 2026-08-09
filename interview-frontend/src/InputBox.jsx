@@ -86,9 +86,8 @@ export default function InputBox({ onSendMessage, disabled, placeholder, onStart
             if (onStartTyping) onStartTyping();
           }}
           onKeyDown={handleKeyDown}
-          placeholder={disabled ? "Waiting for AI..." : placeholder || "Type your answer..."}
-          disabled={disabled}
-          className="flex-1 max-h-32 bg-transparent text-[15px] font-sans text-zinc-100 placeholder-zinc-550 px-3 py-2.5 outline-none resize-none disabled:cursor-not-allowed leading-relaxed"
+          placeholder={placeholder || "Type your answer..."}
+          className="flex-1 max-h-32 bg-transparent text-[15px] font-sans text-zinc-100 placeholder-zinc-550 px-3 py-2.5 outline-none resize-none leading-relaxed"
         />
         
         <motion.button

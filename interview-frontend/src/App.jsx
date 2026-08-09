@@ -597,7 +597,7 @@ export default function App() {
             <motion.div key="chat" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ type: "spring", stiffness: 180, damping: 18, duration: 0.4 }} className="w-full max-w-6xl mx-auto px-4 flex gap-8 items-start h-[calc(100vh-100px)] overflow-hidden">
               <div className="flex-1 flex flex-col justify-between h-full overflow-hidden">
                 <Chat messages={messages} isThinking={isThinking} sessionStatus={sessionStatus} isFocusMode={isFocusMode} setIsFocusMode={setIsFocusMode} detectedDays={detectedDays} />
-                <div className="w-full max-w-[800px] mx-auto px-4 mt-2">
+                <div className="w-full max-w-[800px] mx-auto px-4 mt-2 chat-input">
                   <InputBox 
                     onSendMessage={handleSendMessage} 
                     disabled={isThinking} 
@@ -639,7 +639,7 @@ export default function App() {
       </AnimatePresence>
 
       {screen !== 'chat' && (
-        <footer className="w-full max-w-7xl mx-auto px-6 py-5 text-center text-xs text-zinc-650 border-t border-zinc-900 z-10">
+        <footer className="w-full max-w-7xl mx-auto px-6 py-2 text-center text-[12px] text-zinc-650 opacity-60 border-t border-zinc-900 z-10">
           &copy; {new Date().getFullYear()} TriCore AI. Powered by Advanced Agentic Coding. All rights reserved.
         </footer>
       )}
