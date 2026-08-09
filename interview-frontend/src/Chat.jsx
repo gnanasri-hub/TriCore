@@ -77,27 +77,27 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden w-full max-w-[800px] mx-auto px-4 relative mt-1 min-h-[500px]">
       
-      {/* Top Header Card: Smart Adaptive Progress (PADDING REDUCED & COMPACT LAYOUT) */}
+      {/* Top Header Card: Smart Adaptive Progress (MAX HEIGHT CLAMPED TO 100PX & PADDING MINIMIZED) */}
       <motion.div 
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-card p-3.5 rounded-xl border-purple-500/10 mb-4 flex flex-col gap-2.5 relative overflow-hidden z-10"
+        className="glass-card p-3 rounded-xl border-purple-500/10 mb-4 flex flex-col gap-2 relative overflow-hidden z-10 max-h-[100px]"
       >
         <div className="absolute top-0 left-0 h-[1.5px] bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 w-full" />
         
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-1.5 text-zinc-300">
-            <Sparkles size={12} className="text-purple-400 animate-pulse shrink-0" />
-            <span className="font-bold text-xs tracking-tight font-display">Adaptive Progress</span>
-            <span className="text-[10px] text-zinc-550 hidden sm:inline">• dynamic scaling</span>
+            <Sparkles size={11} className="text-purple-400 animate-pulse shrink-0" />
+            <span className="font-bold text-[11px] tracking-tight font-display">Adaptive Progress</span>
+            <span className="text-[9px] text-zinc-550 hidden sm:inline">• dynamic scaling</span>
           </div>
-          <span className="text-purple-400 font-mono font-extrabold text-[9px] bg-purple-950/20 px-1.5 py-0.5 rounded border border-purple-500/10 animate-pulse">
+          <span className="text-purple-400 font-mono font-extrabold text-[8px] bg-purple-950/20 px-1 py-0.5 rounded border border-purple-500/10 animate-pulse">
             Q{questionCount} / 8+
           </span>
         </div>
 
-        {/* Progress Bar (THINNER) */}
-        <div className="w-full h-1 bg-zinc-950 rounded-full overflow-hidden border border-zinc-900/60 relative">
+        {/* Thinner Progress Bar */}
+        <div className="w-full h-[3px] bg-zinc-950 rounded-full overflow-hidden border border-zinc-900/60 relative">
           <motion.div 
             initial={{ width: 0 }}
             animate={{ width: `${progressPercent}%` }}
@@ -108,10 +108,10 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
           </motion.div>
         </div>
 
-        {/* Dynamic chips (COMPACT SIZES & SPACING) */}
+        {/* Dynamic chips (COMPACT LAYOUT) */}
         {allCoveredDays.length > 0 && (
-          <div className="flex items-center gap-2 pt-1 border-t border-zinc-900/50 flex-wrap">
-            <span className="text-[8px] text-zinc-550 uppercase tracking-widest font-extrabold shrink-0">
+          <div className="flex items-center gap-1.5 pt-1.5 border-t border-zinc-900/40 flex-wrap overflow-hidden">
+            <span className="text-[7.5px] text-zinc-550 uppercase tracking-widest font-extrabold shrink-0">
               Domains:
             </span>
             <motion.div 
@@ -124,7 +124,7 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
                 <motion.span
                   key={dayNum}
                   variants={chipVariants}
-                  className="text-[9px] font-bold bg-purple-950/15 border border-purple-500/10 text-purple-300/80 px-2 py-0.5 rounded shadow-[0_1px_5px_rgba(0,0,0,0.15)] hover:border-purple-500/35 transition-all duration-150"
+                  className="text-[8.5px] font-bold bg-purple-950/15 border border-purple-500/10 text-purple-300/80 px-1.5 py-0.5 rounded shadow-[0_1px_5px_rgba(0,0,0,0.15)]"
                 >
                   {TOPICS[dayNum] || `Day ${dayNum}`}
                 </motion.span>
@@ -134,7 +134,7 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
         )}
       </motion.div>
 
-      {/* Message Scroll Container */}
+      {/* Message Scroll Container (FLEX: 1, OVERFLOW-Y: AUTO) */}
       <div className="flex-1 overflow-y-auto px-1 py-2 space-y-4 rounded-2xl scroll-smooth">
         <div className="flex flex-col min-h-full justify-end">
           {messages.length === 0 && !isThinking && (
@@ -194,21 +194,21 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
         </div>
       </div>
 
-      {/* Focus Mode Question Overlay (Center-Screen Reading layout) */}
+      {/* Focus Mode Question Overlay (POINTER EVENTS INORED ON CONTAINER, ENABLED ON CARD CARD) */}
       <AnimatePresence>
         {showFocusOverlay && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-45 p-6 pointer-events-auto"
+            className="fixed inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-40 p-6 pointer-events-none"
           >
             <motion.div 
               initial={{ scale: 0.98, opacity: 0, y: 20 }}
               animate={{ scale: 1.0, opacity: 1, y: 0 }}
               exit={{ scale: 0.98, opacity: 0, y: 20 }}
               transition={{ type: "spring", stiffness: 220, damping: 20 }}
-              className="glass-card max-w-3xl w-full rounded-3xl p-8 border-purple-500/20 shadow-[0_0_60px_rgba(168,85,247,0.12)] relative"
+              className="glass-card max-w-3xl w-full rounded-3xl p-8 border-purple-500/20 shadow-[0_0_60px_rgba(168,85,247,0.12)] relative pointer-events-auto"
             >
               <div className="flex justify-between items-center mb-6">
                 <div className="inline-flex items-center gap-2 bg-purple-500/10 border border-purple-500/20 text-purple-400 px-3.5 py-1 rounded-full text-xs font-semibold tracking-wider uppercase font-display shadow-[0_0_10px_rgba(168,85,247,0.15)]">
@@ -218,13 +218,13 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
                 
                 {/* Badges */}
                 <div className="flex gap-2">
-                  <span className="text-[10px] font-mono font-bold bg-blue-950/30 text-blue-400 px-2 py-1 rounded-lg border border-blue-500/20 uppercase">
+                  <span className="text-[10px] font-mono font-bold bg-blue-955/35 text-blue-400 px-2 py-1 rounded-lg border border-blue-500/20 uppercase">
                     {lastMsg.domain || "AI Engineering"}
                   </span>
                   <span className={`text-[10px] font-mono font-bold px-2 py-1 rounded-lg border uppercase ${
                     lastMsg.difficulty === 'Hard' 
-                      ? 'bg-pink-950/30 text-pink-400 border-pink-500/20' 
-                      : 'bg-purple-950/30 text-purple-400 border-purple-500/20'
+                      ? 'bg-pink-955/35 text-pink-400 border-pink-500/20' 
+                      : 'bg-purple-955/35 text-purple-400 border-purple-500/20'
                   }`}>
                     {lastMsg.difficulty || "Standard"}
                   </span>
