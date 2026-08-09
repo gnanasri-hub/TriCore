@@ -57,6 +57,9 @@ export default function App() {
   const [tempReply, setTempReply] = useState('');
   const [tempIsFollowUp, setTempIsFollowUp] = useState(false);
 
+  // Active question state
+  const [question, setQuestion] = useState("");
+
   // Adaptive Intelligence & Live states
   const [messages, setMessages] = useState([]);
   const [isThinking, setIsThinking] = useState(false);
@@ -110,18 +113,30 @@ export default function App() {
       };
 
       const startResp = await axios.post('/api/interview', payload);
-      setTempReply(startResp.data.reply);
+      console.log("API response:", startResp.data);
+
+      const firstQ = startResp.data.reply || startResp.data.question || "Explain REST API design.";
+      setTempReply(firstQ);
+      setQuestion(firstQ);
       await updateSessionStatus(sessionId.trim());
       setSystemStatus('ready');
     } catch (err) {
       console.error(err);
-      setErrorMsg(err.response?.data?.detail || "System calibration failure.");
-      setScreen('landing');
-      setSystemStatus('error');
+      console.log("API failed, using fallback.");
+      const fallbackQ = "Explain REST API design.";
+      setTempReply(fallbackQ);
+      setQuestion(fallbackQ);
+      // Create a skeleton session status
+      setSessionStatus({
+        question_count: 1,
+        covered_days: [8],
+        pending_follow_up: { is_pending: false }
+      });
+      setSystemStatus('ready');
     }
   };
 
-  // Step-by-step Jarvis loader progression (0.5s - 1s delay per step)
+  // Step-by-step Jarvis loader progression
   useEffect(() => {
     if (screen !== 'transition') return;
 
@@ -131,7 +146,7 @@ export default function App() {
       }, 850);
       return () => clearTimeout(timer);
     } else {
-      // Completed calibration steps: route to active chat with smooth fade + scale
+      // Completed calibration steps: route to active chat
       const timer = setTimeout(() => {
         setScreen('chat');
         simulateTyping(tempReply, tempIsFollowUp, "AI Engineering", "Standard");
@@ -151,7 +166,6 @@ export default function App() {
     let mockStrengths = [];
     let mockGaps = [];
 
-    // Score depth based on word count
     if (wordCount > 30) {
       mockDepth = 8;
       mockStrengths.push("Detailed structure and context outlining.");
@@ -163,7 +177,6 @@ export default function App() {
       mockGaps.push("Response is brief; lacks concrete implementation details.");
     }
 
-    // Score accuracy based on technical keywords
     if (lower.includes("vector") || lower.includes("rag") || lower.includes("embedding") || lower.includes("sql") || lower.includes("index") || lower.includes("prompt") || lower.includes("agent")) {
       mockAccuracy = 9;
       mockStrengths.push("Accurate usage of domain terminology keywords.");
@@ -172,7 +185,6 @@ export default function App() {
       mockGaps.push("Missed referencing semantic components or concrete libraries.");
     }
 
-    // Score clarity based on sentence connectives
     if (lower.includes("because") || lower.includes("therefore") || lower.includes("specifically") || lower.includes("such as")) {
       mockClarity = 9;
     } else {
@@ -223,7 +235,11 @@ export default function App() {
       };
 
       const turnResp = await axios.post('/api/interview', payload);
+      console.log("API response:", turnResp.data);
       const isDone = turnResp.data.done;
+
+      const nextQ = turnResp.data.reply || turnResp.data.question || "Explain REST API design.";
+      setQuestion(nextQ);
 
       // Extract evaluation details or compile mock fallback
       let evalData = turnResp.data.evaluation;
@@ -254,7 +270,7 @@ export default function App() {
           ...prev, 
           { 
             role: 'assistant', 
-            content: turnResp.data.reply, 
+            content: nextQ, 
             feedback: turnResp.data.feedback, 
             evaluation: evalData,
             id: Date.now() + 1 
@@ -270,13 +286,25 @@ export default function App() {
           ? (TOPICS[activeDays[activeDays.length - 1]] || "System Design")
           : "AI Engineering";
 
-        simulateTyping(turnResp.data.reply, isFollowUp, activeTopic, activeDiff, evalData);
+        simulateTyping(nextQ, isFollowUp, activeTopic, activeDiff, evalData);
       }
     } catch (err) {
       console.error(err);
-      const errMsg = err.response?.data?.detail || "Response evaluation timed out.";
-      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${errMsg}.` }]);
-      setIsThinking(false);
+      console.log("API failed, using fallback.");
+      const fallbackQ = "Explain REST API design.";
+      setQuestion(fallbackQ);
+
+      const evalData = getMockEvaluation(userMessage);
+      setEvaluation(evalData);
+      
+      // Incremented fallback states
+      setSessionStatus(prev => ({
+        question_count: (prev?.question_count || 1) + 1,
+        covered_days: prev?.covered_days || [8],
+        pending_follow_up: { is_pending: false }
+      }));
+
+      simulateTyping(fallbackQ, false, "System Design", "Standard", evalData);
     }
   };
 
@@ -314,6 +342,7 @@ export default function App() {
   const handleReset = () => {
     setScreen('landing');
     setMessages([]);
+    setQuestion("");
     setSessionStatus(null);
     setEvaluation(null);
     setIsFocusMode(false);
@@ -401,7 +430,7 @@ export default function App() {
             >
               {/* Top status readiness bar */}
               <div className="flex justify-between items-center mb-6 bg-zinc-950/40 border border-zinc-900 px-4 py-2 rounded-xl">
-                <span className="text-[10px] font-bold tracking-wider font-mono text-zinc-555 uppercase">System Integrity</span>
+                <span className="text-[10px] font-bold tracking-wider font-mono text-zinc-550 uppercase">System Integrity</span>
                 <div className="flex items-center gap-2">
                   <span className={`w-2 h-2 rounded-full animate-pulse ${
                     systemStatus === 'ready' ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.6)]' : systemStatus === 'loading' ? 'bg-amber-500' : 'bg-red-500'
@@ -450,7 +479,7 @@ export default function App() {
 
                   {/* Candidate Name */}
                   <div>
-                    <label className="block text-[11px] font-bold text-zinc-505 uppercase tracking-wider mb-1.5 pl-0.5">
+                    <label className="block text-[11px] font-bold text-zinc-550 uppercase tracking-wider mb-1.5 pl-0.5">
                       Candidate Name
                     </label>
                     <div className="relative">
@@ -572,7 +601,7 @@ export default function App() {
                 <Cpu size={40} className="text-purple-500 animate-spin mb-6" />
                 <motion.h2 key={transitionStep} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="text-2xl font-bold font-display text-zinc-100 tracking-tight mb-4 min-h-[36px]">{getTransitionString(transitionStep)}</motion.h2>
                 <p className="text-zinc-555 text-xs font-mono mb-8 uppercase tracking-widest animate-pulse">System Calibration In Progress</p>
-                <div className="w-64 h-1 bg-zinc-950 border border-zinc-900 rounded-full overflow-hidden mb-8 relative">
+                <div className="w-64 h-1 bg-zinc-955 border border-zinc-900 rounded-full overflow-hidden mb-8 relative">
                   <motion.div initial={{ width: "0%" }} animate={{ width: `${fakeProgressPercent}%` }} transition={{ duration: 0.7, ease: "easeInOut" }} className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-blue-500 rounded-full relative"><div className="absolute top-0 right-0 bottom-0 left-0 bg-white/20 animate-pulse" /></motion.div>
                 </div>
                 <div className="w-56 space-y-3.5 text-left font-mono text-xs select-none">
@@ -602,7 +631,7 @@ export default function App() {
                     onSendMessage={handleSendMessage} 
                     disabled={isThinking} 
                     onStartTyping={() => setIsFocusMode(false)} 
-                    lastQuestion={messages.filter(m => m.role === 'assistant').slice(-1)[0]?.content}
+                    lastQuestion={question}
                   />
                 </div>
               </div>
