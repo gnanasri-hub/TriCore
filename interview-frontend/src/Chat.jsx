@@ -201,7 +201,7 @@ export default function Chat({ messages, isThinking, sessionStatus, isFocusMode,
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-40 p-6 pointer-events-none"
+            className="fixed inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center z-40 p-6 pointer-events-none focus-overlay"
           >
             <motion.div 
               initial={{ scale: 0.98, opacity: 0, y: 20 }}
