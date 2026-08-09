@@ -7,7 +7,7 @@ import LiveFeedbackPanel from './LiveFeedbackPanel';
 import FeedbackScreen from './FeedbackScreen';
 import { Sparkles, Terminal, ArrowRight, Cpu, Zap, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
 
-axios.defaults.baseURL = "http://127.0.0.1:8001";
+axios.defaults.baseURL = "http://127.0.0.1:8000";
 
 const TOPICS = {
   7: "Embeddings",
@@ -626,7 +626,7 @@ export default function App() {
             <motion.div key="chat" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ type: "spring", stiffness: 180, damping: 18, duration: 0.4 }} className="w-full max-w-6xl mx-auto px-4 flex gap-8 items-start h-[calc(100vh-100px)] overflow-hidden">
               <div className="flex-1 flex flex-col justify-between h-full overflow-hidden">
                 <Chat messages={messages} isThinking={isThinking} sessionStatus={sessionStatus} isFocusMode={isFocusMode} setIsFocusMode={setIsFocusMode} detectedDays={detectedDays} />
-                <div className="w-full max-w-[800px] mx-auto px-4 mt-2 chat-input">
+                <div className="w-full max-w-[800px] mx-auto px-4 mt-2 chat-input relative z-50">
                   <InputBox 
                     onSendMessage={handleSendMessage} 
                     disabled={isThinking} 

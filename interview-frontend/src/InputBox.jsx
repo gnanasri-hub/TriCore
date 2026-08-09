@@ -1,10 +1,16 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { SendHorizontal } from 'lucide-react';
 
 export default function InputBox({ onSendMessage, disabled, placeholder, onStartTyping, lastQuestion }) {
   const [text, setText] = useState('');
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!disabled && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [disabled, lastQuestion]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
