@@ -146,7 +146,7 @@ export default function App() {
       }, 850);
       return () => clearTimeout(timer);
     } else {
-      // Completed calibration steps: route to active chat
+      if (!tempReply) return;
       const timer = setTimeout(() => {
         setScreen('chat');
         simulateTyping(tempReply, tempIsFollowUp, "AI Engineering", "Standard");
