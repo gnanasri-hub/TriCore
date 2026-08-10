@@ -7,7 +7,11 @@ import LiveFeedbackPanel from './LiveFeedbackPanel';
 import FeedbackScreen from './FeedbackScreen';
 import { Sparkles, Terminal, ArrowRight, Cpu, Zap, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
 
-axios.defaults.baseURL = "http://127.0.0.1:8000";
+axios.defaults.baseURL = import.meta.env.VITE_API_BASE_URL || (
+  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? "http://127.0.0.1:8000"
+    : "https://tricore-agent-wdjt.onrender.com"
+);
 
 const TOPICS = {
   7: "Embeddings",

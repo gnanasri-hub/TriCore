@@ -144,18 +144,6 @@ def interview_endpoint(req: InterviewRequest) -> InterviewResponse:
 
     try:
         return dialogue_manager.process_message(session_id, message)
-
-        if result.get("done"):
-        return {
-            "reply": result["reply"],
-            "done": True,
-            "feedback": result["feedback"]
-        }
-    else:
-        return {
-            "reply": result["reply"],
-            "done": False
-        }
     except KeyError as exc:
         raise HTTPException(
             status_code=404,
@@ -193,3 +181,36 @@ def session_status(sessionId: str):
         "interview_stage":  raw.get("interview_stage", "UNKNOWN"),
         "pending_follow_up": raw.get("pending_follow_up", {}),
     }
+
+
+# ── Serve Frontend Statically (Optional) ──────────────────────────────────────
+import os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+frontend_dist_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "interview-frontend", "dist")
+)
+
+if os.path.exists(frontend_dist_path):
+    assets_path = os.path.join(frontend_dist_path, "assets")
+    if os.path.exists(assets_path):
+        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
+    @app.get("/{rest_of_path:path}")
+    async def serve_frontend(rest_of_path: str):
+        if rest_of_path.startswith("api/") or rest_of_path.startswith("docs") or rest_of_path.startswith("openapi.json"):
+            raise HTTPException(status_code=404, detail="Not found")
+        index_file = os.path.join(frontend_dist_path, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        return JSONResponse(status_code=404, content={"detail": "Frontend assets not found."})
+else:
+    @app.get("/")
+    def read_root():
+        return {
+            "message": "AI Interview Agent backend is running successfully.",
+            "api_docs": "/docs",
+            "api_endpoint": "/api/interview"
+        }
+
